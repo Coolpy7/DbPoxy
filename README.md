@@ -1,5 +1,6 @@
 # DbPoxy
 Coolpy7数据库代理
+```
 //插入
 {
 "db_name":"kyb-log-err",
@@ -171,3 +172,4 @@ Coolpy7数据库代理
 "ref_qos":0,
 "filter_id":"5b0a610853c613cd1c4d9840"
 }
+```
