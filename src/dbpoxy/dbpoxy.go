@@ -1,6 +1,8 @@
 package dbpoxy
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"errors"
 	_ "github.com/denisenkom/go-mssqldb"
@@ -8,10 +10,15 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/go-xorm/xorm"
 	_ "github.com/lib/pq"
+	"github.com/mongodb/mongo-go-driver/bson"
+	"github.com/mongodb/mongo-go-driver/bson/primitive"
+	"github.com/mongodb/mongo-go-driver/mongo"
+	"github.com/mongodb/mongo-go-driver/mongo/gridfs"
+	"github.com/mongodb/mongo-go-driver/mongo/options"
+	"github.com/mongodb/mongo-go-driver/mongo/readpref"
+	"github.com/mongodb/mongo-go-driver/x/bsonx"
 	"github.com/pquerna/ffjson/ffjson"
 	"gopkg.in/h2non/filetype.v1"
-	"gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/bson"
 	"gopkg.in/vmihailenco/msgpack.v2"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
@@ -25,13 +32,13 @@ import (
 
 type DbPoxy struct {
 	Config *GatewayConfig
-	Mongo  *mgo.Session
+	Mongo  *mongo.Client
 	Sqldb  *xorm.Engine
 }
 
 func (d *DbPoxy) Close() {
 	if d.Mongo != nil {
-		d.Mongo.Close()
+		d.Mongo.Disconnect(context.Background())
 	}
 	if d.Sqldb != nil {
 		d.Sqldb.Close()
@@ -55,8 +62,6 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 	}
 
 	if d.Config.DatabaseType == "mongodb" {
-		sess := d.Mongo.Copy()
-		defer sess.Close()
 		switch op.OpName {
 		case "insert":
 			if op.Value == nil {
@@ -65,9 +70,8 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 			}
 			LoopParseDatetimeOrOid(op.Value)
 			op.Value["createat"] = time.Now().Local()
-			op.Value["_id"] = bson.NewObjectId()
-			err = sess.DB(op.DbName).C(op.TableName).Insert(op.Value)
-			d.SendOk(client, &op, op.Value["_id"], 1, err)
+			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).InsertOne(context.Background(), op.Value)
+			d.SendOk(client, &op, res.InsertedID, 1, err)
 		case "update":
 			if op.Value == nil {
 				d.SendOk(client, &op, nil, 0, errors.New("value is nil"))
@@ -75,27 +79,37 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 			}
 			LoopParseDatetimeOrOid(op.Value)
 			op.Value["updateat"] = time.Now().Local()
-			if op.FilterId != "" && bson.IsObjectIdHex(op.FilterId) {
-				err = sess.DB(op.DbName).C(op.TableName).UpdateId(bson.ObjectIdHex(op.FilterId), bson.M{"$set": op.Value})
-				d.SendOk(client, &op, op.FilterId, 1, err)
+			findid, err := primitive.ObjectIDFromHex(op.FilterId)
+			if err == nil {
+				filter := bson.M{"_id": findid}
+				res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).UpdateOne(context.Background(), filter, bson.M{"$set": op.Value})
+				d.SendOk(client, &op, nil, int(res.ModifiedCount), err)
 			} else {
 				LoopParseDatetimeOrOid(op.Filter)
-				info, err := sess.DB(op.DbName).C(op.TableName).UpdateAll(op.Filter, bson.M{"$set": op.Value})
-				d.SendOk(client, &op, op.Filter, int(info.Updated), err)
+				res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).UpdateMany(context.Background(), op.Filter, bson.M{"$set": op.Value})
+				d.SendOk(client, &op, nil, int(res.ModifiedCount), err)
 			}
 		case "delete":
-			if op.FilterId != "" && bson.IsObjectIdHex(op.FilterId) {
-				err = sess.DB(op.DbName).C(op.TableName).RemoveId(bson.ObjectIdHex(op.FilterId))
-				d.SendOk(client, &op, op.FilterId, 1, err)
+			findid, err := primitive.ObjectIDFromHex(op.FilterId)
+			if err == nil {
+				filter := bson.M{"_id": findid}
+				res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).DeleteOne(context.Background(), filter)
+				d.SendOk(client, &op, nil, int(res.DeletedCount), err)
 			} else {
 				LoopParseDatetimeOrOid(op.Filter)
-				info, err := sess.DB(op.DbName).C(op.TableName).RemoveAll(op.Filter)
-				d.SendOk(client, &op, op.Filter, int(info.Updated), err)
+				res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).DeleteMany(context.Background(), op.Filter)
+				d.SendOk(client, &op, nil, int(res.DeletedCount), err)
 			}
 		case "query":
-			if op.FilterId != "" && bson.IsObjectIdHex(op.FilterId) {
+			findid, err := primitive.ObjectIDFromHex(op.FilterId)
+			if err == nil {
+				filter := bson.M{"_id": findid}
 				var res map[string]interface{}
-				err = sess.DB(op.DbName).C(op.TableName).FindId(bson.ObjectIdHex(op.FilterId)).One(&res)
+				err = d.Mongo.Database(op.DbName).Collection(op.TableName).FindOne(context.Background(), filter).Decode(&res)
+				if err != nil {
+					d.SendOk(client, &op, nil, 0, err)
+					return
+				}
 				d.SendOk(client, &op, res, len(res), err)
 			} else {
 				if op.FilterPipe == nil {
@@ -104,7 +118,22 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 				}
 				LoopParseDatetimeOrOid(op.FilterPipe)
 				var res []map[string]interface{}
-				err = sess.DB(op.DbName).C(op.TableName).Pipe(op.FilterPipe).All(&res)
+				cur, err := d.Mongo.Database(op.DbName).Collection(op.TableName).Aggregate(context.Background(), op.FilterPipe)
+				if err != nil {
+					d.SendOk(client, &op, nil, 0, err)
+				}
+				defer cur.Close(context.Background())
+				for cur.Next(context.Background()) {
+					var result map[string]interface{}
+					err := cur.Decode(&result)
+					if err != nil {
+						break
+					}
+					res = append(res, result)
+				}
+				if err := cur.Err(); err != nil {
+					d.SendOk(client, &op, nil, 0, err)
+				}
 				d.SendOk(client, &op, res, len(res), err)
 			}
 		default:
@@ -226,8 +255,6 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 			d.SendOk(client, &op, nil, 0, errors.New("invail op"))
 		}
 	} else if d.Config.DatabaseType == "oss-gridfs" {
-		sess := d.Mongo.Copy()
-		defer sess.Close()
 		switch op.OpName {
 		case "insert":
 			if op.OssFileName == "" {
@@ -255,21 +282,36 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 			if unkwown != nil {
 				kind.MIME.Value = "application/octet-stream"
 			}
-			fs, err := sess.DB(op.DbName).GridFS(op.TableName).Create(op.OssFileName)
-			defer fs.Close()
-			fid := bson.NewObjectId()
-			if err == nil {
-				fs.SetId(fid)
-				fs.SetContentType(kind.MIME.Value)
-				fs.SetMeta(map[string]interface{}{
-					"ext": kind.Extension,
-				})
-				fs.Write(op.OssFileHex)
+			bucket, err := gridfs.NewBucket(d.Mongo.Database(op.DbName), options.GridFSBucket().SetName(op.TableName))
+			if err != nil {
+				d.SendOk(client, &op, nil, 0, err)
+				return
+			}
+			rd := bytes.NewReader(op.OssFileHex)
+			fid := primitive.NewObjectID()
+			meta := bsonx.Doc{
+				{"Content-type", bsonx.String(kind.MIME.Value)},
+				{"Ext", bsonx.String(kind.Extension)},
+			}
+			err = bucket.UploadFromStreamWithID(fid, op.OssFileName, rd, options.GridFSUpload().SetMetadata(meta))
+			if err != nil {
+				d.SendOk(client, &op, nil, 0, err)
+				return
 			}
 			d.SendOk(client, &op, fid, 1, err)
 		case "delete":
-			if op.FilterId != "" && bson.IsObjectIdHex(op.FilterId) {
-				err = sess.DB(op.DbName).GridFS(op.TableName).RemoveId(bson.ObjectIdHex(op.FilterId))
+			findid, err := primitive.ObjectIDFromHex(op.FilterId)
+			if err == nil {
+				bucket, err := gridfs.NewBucket(d.Mongo.Database(op.DbName), options.GridFSBucket().SetName(op.TableName))
+				if err != nil {
+					d.SendOk(client, &op, nil, 0, err)
+					return
+				}
+				err = bucket.Delete(findid)
+				if err != nil {
+					d.SendOk(client, &op, nil, 0, err)
+					return
+				}
 				d.SendOk(client, &op, op.FilterId, 1, err)
 			}
 		default:
@@ -290,8 +332,9 @@ func LoopParseDatetimeOrOid(inobj interface{}) {
 				if err == nil {
 					o[k] = nt
 				}
-				if bson.IsObjectIdHex(t.Interface().(string)) {
-					o[k] = bson.ObjectIdHex(t.Interface().(string))
+				id, err := primitive.ObjectIDFromHex(t.Interface().(string))
+				if err == nil {
+					o[k] = id
 				}
 			case reflect.Map, reflect.Array, reflect.Slice:
 				LoopParseDatetimeOrOid(t.Interface())
@@ -309,8 +352,9 @@ func LoopParseDatetimeOrOid(inobj interface{}) {
 				if err == nil {
 					o[i] = nt
 				}
-				if bson.IsObjectIdHex(t.Interface().(string)) {
-					o[i] = bson.ObjectIdHex(t.Interface().(string))
+				id, err := primitive.ObjectIDFromHex(t.Interface().(string))
+				if err == nil {
+					o[i] = id
 				}
 			case reflect.Map, reflect.Array, reflect.Slice:
 				LoopParseDatetimeOrOid(t.Interface())
@@ -381,12 +425,18 @@ func (d *DbPoxy) ParseConfig(filename string) error {
 	d.Config = &config
 
 	if d.Config.DatabaseType == "mongodb" || d.Config.DatabaseType == "oss-gridfs" {
-		d.Mongo, err = mgo.Dial(config.DatabaseConnectionString)
+		d.Mongo, err = mongo.NewClient(config.DatabaseConnectionString)
 		if err != nil {
 			return err
 		}
-		d.Mongo.SetMode(mgo.Monotonic, true)
-		if err = d.Mongo.Ping(); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		err = d.Mongo.Connect(ctx)
+		if err != nil {
+			return err
+		}
+		err = d.Mongo.Ping(ctx, readpref.PrimaryPreferred())
+		if err != nil {
 			log.Println(d.Config.DatabaseType, "ping err", err.Error())
 		} else {
 			log.Println(d.Config.DatabaseType, "ping ok")
