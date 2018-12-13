@@ -66,12 +66,12 @@ func main() {
 		SetAutoReconnect(true).SetMaxReconnectInterval(2 * time.Second).SetCleanSession(poxy.Config.BrokerClearSession)
 	c := MQTT.NewClient(opts)
 	if token := c.Connect(); token.Wait() && token.Error() != nil {
-		log.Println("start error", err.Error())
+		log.Println("start error", token.Error())
 		return
 	}
 
 	if token := c.Subscribe(poxy.Config.OpTopics.Topic, poxy.Config.OpTopics.Qos, poxy.BrokerLoadHandler); token.Wait() && token.Error() != nil {
-		log.Println("start error", err.Error())
+		log.Println("start error", token.Error())
 		return
 	} else {
 		log.Println(poxy.Config.OpTopics.Topic, "OK, token:", poxy.Config.AccessToken)
