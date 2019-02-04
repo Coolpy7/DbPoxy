@@ -1,13 +1,13 @@
 #mongodb
 DatabaseType: mongodb
-DatabaseConnectionString: mongodb://192.168.200.250:27017
+DatabaseConnectionString: mongodb://localhost:27017
 #postgres
 #DatabaseType: postgres #mssql mysql postgres  mongodb oss-gridfs
 #DatabaseConnectionString: host=192.168.100.187 port=13246 user=postgres dbname=ldh sslmode=disable password=123456
 #oss
 #DatabaseType: oss-gridfs
-#DatabaseConnectionString: mongodb://192.168.200.250:27017
-BrokerHost: i.icoolpy.com
+#DatabaseConnectionString: mongodb://127.0.0.1:27017
+BrokerHost: 127.0.0.1
 BrokerPort: 1883
 BrokerClientId: dbpoxy
 BrokerUser: dypoxy

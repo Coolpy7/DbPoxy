@@ -31,29 +31,50 @@ import (
 )
 
 type DbPoxy struct {
-	Config *GatewayConfig
-	Mongo  *mongo.Client
-	Sqldb  *xorm.Engine
+	Config  *GatewayConfig
+	Mongo   *mongo.Client
+	Sqldb   *xorm.Engine
+	jsonpre byte
+	jsonend byte
+}
+
+func NewDbPoxy() *DbPoxy {
+	poxy := &DbPoxy{}
+	poxy.jsonpre = byte('{')
+	poxy.jsonend = byte('}')
+	return poxy
 }
 
 func (d *DbPoxy) Close() {
 	if d.Mongo != nil {
-		d.Mongo.Disconnect(context.Background())
+		_ = d.Mongo.Disconnect(context.Background())
 	}
 	if d.Sqldb != nil {
-		d.Sqldb.Close()
+		_ = d.Sqldb.Close()
 	}
 }
 
 func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 	var op Operation
-	err := ffjson.Unmarshal(msg.Payload(), &op)
-	if err != nil {
-		err = msgpack.Unmarshal(msg.Payload(), &op)
+	payload := msg.Payload()
+	if len(payload) == 0 {
+		log.Println("error payload is nil")
+		return
+	}
+	if payload[0] == d.jsonpre && payload[len(payload)-1] == d.jsonend {
+		err := ffjson.Unmarshal(payload, &op)
 		if err != nil {
+			log.Println("error payload json unmarshal", string(payload))
+			return
+		}
+	} else {
+		err := msgpack.Unmarshal(payload, &op)
+		if err != nil {
+			log.Println("error payload msgpack unmarshal", string(payload))
 			return
 		}
 	}
+
 	if d.Config.AccessToken != "" {
 		if d.Config.AccessToken != op.Token {
 			d.SendOk(client, &op, nil, 0, errors.New("token error"))
@@ -217,7 +238,7 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 					}
 				}
 				if haserr == nil {
-					err = ss.Commit()
+					ss.Commit()
 				}
 				d.SendOk(client, &op, res, len(res), haserr)
 			}
@@ -267,11 +288,12 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 				if len(bfs) == 2 {
 					op.OssFileBase64 = bfs[1]
 				}
-				op.OssFileHex, err = base64.StdEncoding.DecodeString(op.OssFileBase64)
+				fhex, err := base64.StdEncoding.DecodeString(op.OssFileBase64)
 				if err != nil {
 					d.SendOk(client, &op, nil, 0, err)
 					return
 				}
+				op.OssFileHex = fhex
 			}
 			if len(op.OssFileHex) < 261 {
 				d.SendOk(client, &op, nil, 0, errors.New("content less"))

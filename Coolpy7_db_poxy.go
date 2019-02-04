@@ -45,7 +45,7 @@ func main() {
 		*confFile = dir + "/dbpoxy.yml"
 	}
 
-	poxy := &dbpoxy.DbPoxy{}
+	poxy := dbpoxy.NewDbPoxy()
 
 	// parse config
 	err = poxy.ParseConfig(*confFile)
