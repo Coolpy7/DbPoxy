@@ -23,6 +23,7 @@ func init() {
 func main() {
 	var (
 		confFile = flag.String("c", "", "config file path")
+		cmdFile  = flag.String("s", "", "cmd config file path")
 	)
 	flag.Parse()
 
@@ -52,6 +53,19 @@ func main() {
 	if err != nil {
 		log.Println(err)
 		return
+	}
+
+	if *cmdFile == "" {
+		*cmdFile = dir + "/cmd.json"
+	}
+
+	if _, err := os.Stat(*cmdFile); err == nil {
+		// parse cmd config
+		err = poxy.ParseCmdConfig(*cmdFile)
+		if err != nil {
+			log.Println(err)
+			return
+		}
 	}
 
 	// initialize logger

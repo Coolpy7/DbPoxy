@@ -1,0 +1,21 @@
+{
+  "databasetype": "postgres",
+  "enable": true,
+  "ginject": "",
+  "cmds": [
+    {
+      "opname": "select",
+      "inject": "and,or",
+      "cmdid": 1,
+      "cmd": "select * from user where id = {0}",
+      "pcount": 1
+    },
+    {
+      "opname": "insert",
+      "inject": "and,or",
+      "cmdid": 2,
+      "cmd": "INSERT INTO users(age, name, num) VALUES ({0}, {1}, {2})",
+      "pcount": 3
+    }
+  ]
+}

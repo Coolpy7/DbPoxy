@@ -32,6 +32,7 @@ import (
 
 type DbPoxy struct {
 	Config  *GatewayConfig
+	Cmdfig  *CmdConfig
 	Mongo   *mongo.Client
 	Sqldb   *xorm.Engine
 	jsonpre byte
@@ -480,5 +481,22 @@ func (d *DbPoxy) ParseConfig(filename string) error {
 		log.Println(d.Config.DatabaseType, "not suport database type")
 	}
 
+	return nil
+}
+
+func (d *DbPoxy) ParseCmdConfig(filename string) error {
+	var config CmdConfig
+	jsonStr, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+	err = ffjson.Unmarshal(jsonStr, &config)
+	if err != nil {
+		return err
+	}
+	d.Cmdfig = &config
+	if d.Cmdfig.DatabaseType != d.Config.DatabaseType {
+		return errors.New("database type dbpoxy.yml and cmd.json not equal")
+	}
 	return nil
 }
