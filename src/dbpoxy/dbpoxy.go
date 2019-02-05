@@ -495,8 +495,13 @@ func (d *DbPoxy) ParseCmdConfig(filename string) error {
 		return err
 	}
 	d.Cmdfig = &config
-	if d.Cmdfig.DatabaseType != d.Config.DatabaseType {
-		return errors.New("database type dbpoxy.yml and cmd.json not equal")
+	if d.Config.DatabaseType == "postgres" || d.Config.DatabaseType == "mssql" || d.Config.DatabaseType == "mysql" {
+		if d.Cmdfig.DatabaseType != d.Config.DatabaseType {
+			return errors.New("database type dbpoxy.yml and cmd.json not equal")
+		}
+	} else {
+		log.Println("cmd.json not working, just support sql database")
 	}
+
 	return nil
 }
