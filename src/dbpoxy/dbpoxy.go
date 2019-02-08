@@ -84,82 +84,26 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 	}
 
 	if d.Config.DatabaseType == "mongodb" {
-		switch op.OpName {
-		case "insert":
-			if op.Value == nil {
-				d.SendOk(client, &op, nil, 0, errors.New("value is nil"))
-				return
-			}
-			LoopParseDatetimeOrOid(op.Value)
-			op.Value["createat"] = time.Now().Local()
-			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).InsertOne(context.Background(), op.Value)
-			d.SendOk(client, &op, res.InsertedID, 1, err)
-		case "update":
-			if op.Value == nil {
-				d.SendOk(client, &op, nil, 0, errors.New("value is nil"))
-				return
-			}
-			LoopParseDatetimeOrOid(op.Value)
-			op.Value["updateat"] = time.Now().Local()
-			findid, err := primitive.ObjectIDFromHex(op.FilterId)
-			if err == nil {
-				filter := bson.M{"_id": findid}
-				res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).UpdateOne(context.Background(), filter, bson.M{"$set": op.Value})
-				d.SendOk(client, &op, nil, int(res.ModifiedCount), err)
-			} else {
-				LoopParseDatetimeOrOid(op.Filter)
-				res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).UpdateMany(context.Background(), op.Filter, bson.M{"$set": op.Value})
-				d.SendOk(client, &op, nil, int(res.ModifiedCount), err)
-			}
-		case "delete":
-			findid, err := primitive.ObjectIDFromHex(op.FilterId)
-			if err == nil {
-				filter := bson.M{"_id": findid}
-				res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).DeleteOne(context.Background(), filter)
-				d.SendOk(client, &op, nil, int(res.DeletedCount), err)
-			} else {
-				LoopParseDatetimeOrOid(op.Filter)
-				res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).DeleteMany(context.Background(), op.Filter)
-				d.SendOk(client, &op, nil, int(res.DeletedCount), err)
-			}
-		case "query":
-			findid, err := primitive.ObjectIDFromHex(op.FilterId)
-			if err == nil {
-				filter := bson.M{"_id": findid}
-				var res map[string]interface{}
-				err = d.Mongo.Database(op.DbName).Collection(op.TableName).FindOne(context.Background(), filter).Decode(&res)
-				if err != nil {
-					d.SendOk(client, &op, nil, 0, err)
-					return
-				}
-				d.SendOk(client, &op, res, len(res), err)
-			} else {
-				if op.FilterPipe == nil {
-					d.SendOk(client, &op, nil, 0, errors.New("filter pipe is nil"))
-					return
-				}
-				LoopParseDatetimeOrOid(op.FilterPipe)
-				var res []map[string]interface{}
-				cur, err := d.Mongo.Database(op.DbName).Collection(op.TableName).Aggregate(context.Background(), op.FilterPipe)
-				if err != nil {
-					d.SendOk(client, &op, nil, 0, err)
-				}
-				defer cur.Close(context.Background())
-				for cur.Next(context.Background()) {
-					var result map[string]interface{}
-					err := cur.Decode(&result)
-					if err != nil {
-						break
+		if op.SaveMode == nil {
+			d.mgdo(client, op)
+		} else if *op.SaveMode && d.Cmdfig.Enable {
+			for _, v := range d.Cmdfig.Cmd {
+				if op.CmdId == v.CmdId && len(op.Params) == int(v.Pcount) {
+					op.DbName = v.DbName
+					op.TableName = v.TableName
+					op.OpName = v.OpName
+					op.Value = make(map[string]interface{})
+					for k1, v1 := range v.Value {
+						if vv, ok := v1.(string); ok {
+							op.Value[k1] = op.Params[vv]
+						}
 					}
-					res = append(res, result)
+					d.mgdo(client, op)
+				} else {
+					d.SendOk(client, &op, nil, 0, errors.New("save mode params count error"))
+					return
 				}
-				if err := cur.Err(); err != nil {
-					d.SendOk(client, &op, nil, 0, err)
-				}
-				d.SendOk(client, &op, res, len(res), err)
 			}
-		default:
-			d.SendOk(client, &op, nil, 0, errors.New("invail op"))
 		}
 	} else if d.Config.DatabaseType == "postgres" || d.Config.DatabaseType == "mssql" || d.Config.DatabaseType == "mysql" {
 		sess := d.Sqldb.Table(op.TableName)
@@ -343,6 +287,86 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 	}
 }
 
+func (d *DbPoxy) mgdo(client MQTT.Client, op Operation) {
+	switch op.OpName {
+	case "insert":
+		if op.Value == nil {
+			d.SendOk(client, &op, nil, 0, errors.New("value is nil"))
+			return
+		}
+		LoopParseDatetimeOrOid(op.Value)
+		op.Value["createat"] = time.Now().Local()
+		res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).InsertOne(context.Background(), op.Value)
+		d.SendOk(client, &op, res.InsertedID, 1, err)
+	case "update":
+		if op.Value == nil {
+			d.SendOk(client, &op, nil, 0, errors.New("value is nil"))
+			return
+		}
+		LoopParseDatetimeOrOid(op.Value)
+		op.Value["updateat"] = time.Now().Local()
+		findid, err := primitive.ObjectIDFromHex(op.FilterId)
+		if err == nil {
+			filter := bson.M{"_id": findid}
+			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).UpdateOne(context.Background(), filter, bson.M{"$set": op.Value})
+			d.SendOk(client, &op, nil, int(res.ModifiedCount), err)
+		} else {
+			LoopParseDatetimeOrOid(op.Filter)
+			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).UpdateMany(context.Background(), op.Filter, bson.M{"$set": op.Value})
+			d.SendOk(client, &op, nil, int(res.ModifiedCount), err)
+		}
+	case "delete":
+		findid, err := primitive.ObjectIDFromHex(op.FilterId)
+		if err == nil {
+			filter := bson.M{"_id": findid}
+			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).DeleteOne(context.Background(), filter)
+			d.SendOk(client, &op, nil, int(res.DeletedCount), err)
+		} else {
+			LoopParseDatetimeOrOid(op.Filter)
+			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).DeleteMany(context.Background(), op.Filter)
+			d.SendOk(client, &op, nil, int(res.DeletedCount), err)
+		}
+	case "query":
+		findid, err := primitive.ObjectIDFromHex(op.FilterId)
+		if err == nil {
+			filter := bson.M{"_id": findid}
+			var res map[string]interface{}
+			err = d.Mongo.Database(op.DbName).Collection(op.TableName).FindOne(context.Background(), filter).Decode(&res)
+			if err != nil {
+				d.SendOk(client, &op, nil, 0, err)
+				return
+			}
+			d.SendOk(client, &op, res, len(res), err)
+		} else {
+			if op.FilterPipe == nil {
+				d.SendOk(client, &op, nil, 0, errors.New("filter pipe is nil"))
+				return
+			}
+			LoopParseDatetimeOrOid(op.FilterPipe)
+			var res []map[string]interface{}
+			cur, err := d.Mongo.Database(op.DbName).Collection(op.TableName).Aggregate(context.Background(), op.FilterPipe)
+			if err != nil {
+				d.SendOk(client, &op, nil, 0, err)
+			}
+			defer cur.Close(context.Background())
+			for cur.Next(context.Background()) {
+				var result map[string]interface{}
+				err := cur.Decode(&result)
+				if err != nil {
+					break
+				}
+				res = append(res, result)
+			}
+			if err := cur.Err(); err != nil {
+				d.SendOk(client, &op, nil, 0, err)
+			}
+			d.SendOk(client, &op, res, len(res), err)
+		}
+	default:
+		d.SendOk(client, &op, nil, 0, errors.New("invail op"))
+	}
+}
+
 func LoopParseDatetimeOrOid(inobj interface{}) {
 	obj := reflect.ValueOf(inobj)
 	if obj.Kind() == reflect.Map {
@@ -495,12 +519,8 @@ func (d *DbPoxy) ParseCmdConfig(filename string) error {
 		return err
 	}
 	d.Cmdfig = &config
-	if d.Config.DatabaseType == "postgres" || d.Config.DatabaseType == "mssql" || d.Config.DatabaseType == "mysql" {
-		if d.Cmdfig.DatabaseType != d.Config.DatabaseType {
-			return errors.New("database type dbpoxy.yml and cmd.json not equal")
-		}
-	} else {
-		log.Println("cmd.json not working, just support sql database")
+	if d.Cmdfig.DatabaseType != d.Config.DatabaseType {
+		return errors.New("database type dbpoxy.yml and cmd.json not equal")
 	}
 
 	return nil

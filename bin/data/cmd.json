@@ -1,21 +1,20 @@
 {
-  "databasetype": "postgres",
+  "database_type": "mongodb",
   "enable": true,
-  "ginject": "",
-  "cmds": [
+  "inject": "$",
+  "cmd": [
     {
-      "opname": "select",
-      "inject": "and,or",
-      "cmdid": 1,
-      "cmd": "select * from user where id = {0}",
-      "pcount": 1
-    },
-    {
-      "opname": "insert",
-      "inject": "and,or",
-      "cmdid": 2,
-      "cmd": "INSERT INTO users(age, name, num) VALUES ({0}, {1}, {2})",
-      "pcount": 3
+      "db_name": "DbPoxyTestDB",
+      "table_name": "test",
+      "op_name": "insert",
+      "inject": "$",
+      "cmd_id": 1,
+      "value": {
+        "datetime": "{0}",
+        "number": "{1}",
+        "string": "{2}"
+      },
+      "param_count": 3
     }
   ]
 }

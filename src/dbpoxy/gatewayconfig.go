@@ -20,16 +20,18 @@ type OpTopic struct {
 }
 
 type CmdConfig struct {
-	DatabaseType string    `json:"databasetype"`
+	DatabaseType string    `json:"database_type"`
 	Enable       bool      `json:"enable"`
-	GInject      string    `json:"ginject"`
-	Cmds         []PureCmd `json:"cmds"`
+	GInject      string    `json:"inject"`
+	Cmd          []PureCmd `json:"cmd"`
 }
 
 type PureCmd struct {
-	Inject string `json:"inject"`
-	CmdId  int64  `json:"cmdid"`
-	Cmd    string `json:"cmd"`
-	Pcount int    `json:"pcount"`
-	OpName string `json:"opname"`
+	DbName    string                 `json:"db_name,omitempty" msgpack:"db_name,omitempty"`
+	TableName string                 `json:"table_name,omitempty" msgpack:"table_name,omitempty"`
+	OpName    string                 `json:"op_name,omitempty" msgpack:"op_name,omitempty"`
+	Inject    string                 `json:"inject"`
+	CmdId     uint32                 `json:"cmd_id"`
+	Value     map[string]interface{} `json:"value"`
+	Pcount    uint32                 `json:"param_count"`
 }

@@ -22,6 +22,10 @@ type Operation struct {
 	OssFileName   string                 `json:"oss_file_name,omitempty" msgpack:"oss_file_name,omitempty"`
 	OssFileBase64 string                 `json:"oss_file_base64,omitempty" msgpack:"oss_file_base64,omitempty"` //base, hex
 	OssFileHex    []byte                 `json:"oss_file_hex,omitempty" msgpack:"oss_file_hex,omitempty"`
+	//安全模式
+	SaveMode *bool                  `json:"save_mode,omitempty" msgpack:"save_mode,omitempty"`
+	CmdId    uint32                 `json:"cmd_id,omitempty" msgpack:"cmd_id,omitempty"`
+	Params   map[string]interface{} `json:"params,omitempty" msgpack:"params,omitempty"`
 }
 
 type SqlWork struct {
