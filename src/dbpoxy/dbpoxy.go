@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	_ "github.com/denisenkom/go-mssqldb"
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 	_ "github.com/go-sql-driver/mysql"
@@ -129,184 +130,253 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 			}
 		}
 	} else if d.Config.DatabaseType == "postgres" || d.Config.DatabaseType == "mssql" || d.Config.DatabaseType == "mysql" {
-		sess := d.Sqldb.Table(op.TableName)
-		defer sess.Close()
-		switch op.OpName {
-		case "insert":
-			if op.SqlExec == "" {
-				d.SendOk(client, &op, nil, 0, errors.New("sqlexec is nil"))
-				return
+		if op.SaveMode == nil {
+			d.sqldo(client, op)
+		} else if *op.SaveMode && d.Cmdfig.Enable {
+			//全局防注入
+			if d.Cmdfig.GInject != "" {
+				for _, v := range op.Params {
+					if vv, ok := v.(string); ok {
+						if strings.Contains(vv, d.Cmdfig.GInject) {
+							d.SendOk(client, &op, nil, 0, errors.New("inject error"))
+							return
+						}
+					}
+				}
 			}
-			ref, err := sess.Exec(op.SqlExec)
-			if err != nil {
-				d.SendOk(client, &op, nil, 0, err)
-			}
-			nid, err := ref.LastInsertId()
-			if err != nil {
-				var nids []int64
-				err = sess.SQL("SELECT MAX(id) FROM " + op.TableName).Find(&nids)
-				if err == nil {
-					d.SendOk(client, &op, map[string]interface{}{"id": nids[0]}, 1, nil)
+			//指令转换
+			for _, v := range d.Cmdfig.Cmd {
+				if op.CmdId == v.CmdId && len(op.Params) == int(v.Pcount) {
+					//指令防注入
+					if v.Inject != "" {
+						for _, pv := range op.Params {
+							if vv, ok := pv.(string); ok {
+								if strings.Contains(vv, v.Inject) {
+									d.SendOk(client, &op, nil, 0, errors.New("inject error"))
+									return
+								}
+							}
+						}
+					}
+					op.DbName = v.DbName
+					op.TableName = v.TableName
+					op.OpName = v.OpName
+					switch op.OpName {
+					case "insert", "update", "delete":
+						if vv, ok := v.Value["sql_exec"].(string); ok {
+							sql := vv
+							for pk, pv := range op.Params {
+								if reflect.TypeOf(pv).Kind() == reflect.String {
+									sql = strings.Replace(sql, pk, "'%v'", -1)
+								} else {
+									sql = strings.Replace(sql, pk, "%v", -1)
+								}
+							}
+							itfs := make([]interface{}, 0)
+							for i := 0; i < len(op.Params); i++ {
+								itfs = append(itfs, op.Params["{"+strconv.Itoa(i)+"}"])
+							}
+							sql = fmt.Sprintf(sql, itfs...)
+							op.SqlExec = sql
+						}
+					//case "query":
+					//	op.SqlQuery = v1.(string)
+					default:
+						d.SendOk(client, &op, nil, 0, errors.New("op error"))
+						return
+					}
+					d.sqldo(client, op)
 				} else {
-					d.SendOk(client, &op, nil, 0, err)
-				}
-			} else {
-				d.SendOk(client, &op, map[string]interface{}{"id": nid}, 1, nil)
-			}
-		case "update", "delete":
-			if op.SqlExec == "" {
-				d.SendOk(client, &op, nil, 0, errors.New("sqlexec is nil"))
-				return
-			}
-			ref, err := sess.Exec(op.SqlExec)
-			changes, err := ref.RowsAffected()
-			d.SendOk(client, &op, nil, int(changes), err)
-		case "work":
-			if len(op.SqlWorks) > 0 {
-				var haserr error
-				res := make(map[int]interface{})
-				alias := make(map[string]string)
-				ss := d.Sqldb.NewSession()
-				defer ss.Close()
-				for idx, v := range op.SqlWorks {
-					if v.Work != "" {
-						if strings.HasPrefix(strings.ToLower(v.Work), "insert") {
-							ref, err := ss.Exec(v.Work)
-							if err != nil {
-								res[idx] = err.Error()
-								ss.Rollback()
-								haserr = err
-								break
-							}
-							nid, err := ref.LastInsertId()
-							if err != nil {
-								var nids []int64
-								sess.SQL("SELECT MAX(id) FROM " + v.TableName).Find(&nids)
-								res[idx] = nids[0]
-								alias[v.IdAlias] = strconv.FormatInt(nids[0], 10)
-							} else {
-								res[idx] = nid
-								alias[v.IdAlias] = strconv.FormatInt(nid, 10)
-							}
-						} else {
-							work := ""
-							for k, vv := range alias {
-								work = strings.Replace(v.Work, k, vv, -1)
-							}
-							ref, err := sess.Exec(work)
-							if err != nil {
-								res[idx] = err.Error()
-								ss.Rollback()
-								haserr = err
-								break
-							}
-							changes, _ := ref.RowsAffected()
-							res[idx] = changes
-						}
-					}
-				}
-				if haserr == nil {
-					ss.Commit()
-				}
-				d.SendOk(client, &op, res, len(res), haserr)
-			}
-		case "query":
-			if op.SqlQuery == "" {
-				d.SendOk(client, &op, nil, 0, errors.New("sqlquery is nil"))
-				return
-			}
-			var res []map[string]interface{}
-			result, err := sess.Query(op.SqlQuery)
-			for _, re := range result {
-				mm := make(map[string]interface{})
-				for k, v := range re {
-					nv := string(v)
-					nt, err := time.Parse(time.RFC3339, nv)
-					if err == nil {
-						mm[k] = nt
-					} else {
-						ff, err := strconv.ParseFloat(nv, 64)
-						if err == nil {
-							mm[k] = ff
-						} else {
-							mm[k] = nv
-						}
-					}
-				}
-				res = append(res, mm)
-			}
-			if err == nil {
-				d.SendOk(client, &op, res, len(res), nil)
-			} else {
-				d.SendOk(client, &op, nil, 0, err)
-			}
-		default:
-			d.SendOk(client, &op, nil, 0, errors.New("invail op"))
-		}
-	} else if d.Config.DatabaseType == "oss-gridfs" {
-		switch op.OpName {
-		case "insert":
-			if op.OssFileName == "" {
-				d.SendOk(client, &op, nil, 0, errors.New("value is nil"))
-				return
-			}
-			op.OssFileName = strings.ToLower(op.OssFileName)
-			if op.OssFileBase64 != "" {
-				bfs := strings.Split(op.OssFileBase64, ",")
-				if len(bfs) == 2 {
-					op.OssFileBase64 = bfs[1]
-				}
-				fhex, err := base64.StdEncoding.DecodeString(op.OssFileBase64)
-				if err != nil {
-					d.SendOk(client, &op, nil, 0, err)
+					d.SendOk(client, &op, nil, 0, errors.New("save mode params count error"))
 					return
 				}
-				op.OssFileHex = fhex
 			}
-			if len(op.OssFileHex) < 261 {
-				d.SendOk(client, &op, nil, 0, errors.New("content less"))
+		}
+	} else if d.Config.DatabaseType == "oss-gridfs" {
+		d.ssodo(client, op)
+	}
+}
+
+func (d *DbPoxy) ssodo(client MQTT.Client, op Operation) {
+	switch op.OpName {
+	case "insert":
+		if op.OssFileName == "" {
+			d.SendOk(client, &op, nil, 0, errors.New("value is nil"))
+			return
+		}
+		op.OssFileName = strings.ToLower(op.OssFileName)
+		if op.OssFileBase64 != "" {
+			bfs := strings.Split(op.OssFileBase64, ",")
+			if len(bfs) == 2 {
+				op.OssFileBase64 = bfs[1]
+			}
+			fhex, err := base64.StdEncoding.DecodeString(op.OssFileBase64)
+			if err != nil {
+				d.SendOk(client, &op, nil, 0, err)
 				return
 			}
-			//提取http的content-type文件类型
-			kind, unkwown := filetype.Match(op.OssFileHex[:261])
-			if unkwown != nil {
-				kind.MIME.Value = "application/octet-stream"
-			}
+			op.OssFileHex = fhex
+		}
+		if len(op.OssFileHex) < 261 {
+			d.SendOk(client, &op, nil, 0, errors.New("content less"))
+			return
+		}
+		//提取http的content-type文件类型
+		kind, unkwown := filetype.Match(op.OssFileHex[:261])
+		if unkwown != nil {
+			kind.MIME.Value = "application/octet-stream"
+		}
+		bucket, err := gridfs.NewBucket(d.Mongo.Database(op.DbName), options.GridFSBucket().SetName(op.TableName))
+		if err != nil {
+			d.SendOk(client, &op, nil, 0, err)
+			return
+		}
+		rd := bytes.NewReader(op.OssFileHex)
+		fid := primitive.NewObjectID()
+		meta := bsonx.Doc{
+			{"Content-type", bsonx.String(kind.MIME.Value)},
+			{"Ext", bsonx.String(kind.Extension)},
+		}
+		err = bucket.UploadFromStreamWithID(fid, op.OssFileName, rd, options.GridFSUpload().SetMetadata(meta))
+		if err != nil {
+			d.SendOk(client, &op, nil, 0, err)
+			return
+		}
+		d.SendOk(client, &op, fid, 1, err)
+	case "delete":
+		findid, err := primitive.ObjectIDFromHex(op.FilterId)
+		if err == nil {
 			bucket, err := gridfs.NewBucket(d.Mongo.Database(op.DbName), options.GridFSBucket().SetName(op.TableName))
 			if err != nil {
 				d.SendOk(client, &op, nil, 0, err)
 				return
 			}
-			rd := bytes.NewReader(op.OssFileHex)
-			fid := primitive.NewObjectID()
-			meta := bsonx.Doc{
-				{"Content-type", bsonx.String(kind.MIME.Value)},
-				{"Ext", bsonx.String(kind.Extension)},
-			}
-			err = bucket.UploadFromStreamWithID(fid, op.OssFileName, rd, options.GridFSUpload().SetMetadata(meta))
+			err = bucket.Delete(findid)
 			if err != nil {
 				d.SendOk(client, &op, nil, 0, err)
 				return
 			}
-			d.SendOk(client, &op, fid, 1, err)
-		case "delete":
-			findid, err := primitive.ObjectIDFromHex(op.FilterId)
-			if err == nil {
-				bucket, err := gridfs.NewBucket(d.Mongo.Database(op.DbName), options.GridFSBucket().SetName(op.TableName))
-				if err != nil {
-					d.SendOk(client, &op, nil, 0, err)
-					return
-				}
-				err = bucket.Delete(findid)
-				if err != nil {
-					d.SendOk(client, &op, nil, 0, err)
-					return
-				}
-				d.SendOk(client, &op, op.FilterId, 1, err)
-			}
-		default:
-			d.SendOk(client, &op, nil, 0, errors.New("invail op"))
+			d.SendOk(client, &op, op.FilterId, 1, err)
 		}
+	default:
+		d.SendOk(client, &op, nil, 0, errors.New("invail op"))
+	}
+}
+
+func (d *DbPoxy) sqldo(client MQTT.Client, op Operation) {
+	sess := d.Sqldb.Table(op.TableName)
+	defer sess.Close()
+	switch op.OpName {
+	case "insert":
+		if op.SqlExec == "" {
+			d.SendOk(client, &op, nil, 0, errors.New("sqlexec is nil"))
+			return
+		}
+		ref, err := sess.Exec(op.SqlExec)
+		if err != nil {
+			d.SendOk(client, &op, nil, 0, err)
+		}
+		nid, err := ref.LastInsertId()
+		if err != nil {
+			var nids []int64
+			err = sess.SQL("SELECT MAX(id) FROM " + op.TableName).Find(&nids)
+			if err == nil {
+				d.SendOk(client, &op, map[string]interface{}{"id": nids[0]}, 1, nil)
+			} else {
+				d.SendOk(client, &op, nil, 0, err)
+			}
+		} else {
+			d.SendOk(client, &op, map[string]interface{}{"id": nid}, 1, nil)
+		}
+	case "update", "delete":
+		if op.SqlExec == "" {
+			d.SendOk(client, &op, nil, 0, errors.New("sqlexec is nil"))
+			return
+		}
+		ref, err := sess.Exec(op.SqlExec)
+		changes, err := ref.RowsAffected()
+		d.SendOk(client, &op, nil, int(changes), err)
+	case "work":
+		if len(op.SqlWorks) > 0 {
+			var haserr error
+			res := make(map[int]interface{})
+			alias := make(map[string]string)
+			ss := d.Sqldb.NewSession()
+			defer ss.Close()
+			for idx, v := range op.SqlWorks {
+				if v.Work != "" {
+					if strings.HasPrefix(strings.ToLower(v.Work), "insert") {
+						ref, err := ss.Exec(v.Work)
+						if err != nil {
+							res[idx] = err.Error()
+							ss.Rollback()
+							haserr = err
+							break
+						}
+						nid, err := ref.LastInsertId()
+						if err != nil {
+							var nids []int64
+							sess.SQL("SELECT MAX(id) FROM " + v.TableName).Find(&nids)
+							res[idx] = nids[0]
+							alias[v.IdAlias] = strconv.FormatInt(nids[0], 10)
+						} else {
+							res[idx] = nid
+							alias[v.IdAlias] = strconv.FormatInt(nid, 10)
+						}
+					} else {
+						work := ""
+						for k, vv := range alias {
+							work = strings.Replace(v.Work, k, vv, -1)
+						}
+						ref, err := sess.Exec(work)
+						if err != nil {
+							res[idx] = err.Error()
+							ss.Rollback()
+							haserr = err
+							break
+						}
+						changes, _ := ref.RowsAffected()
+						res[idx] = changes
+					}
+				}
+			}
+			if haserr == nil {
+				ss.Commit()
+			}
+			d.SendOk(client, &op, res, len(res), haserr)
+		}
+	case "query":
+		if op.SqlQuery == "" {
+			d.SendOk(client, &op, nil, 0, errors.New("sqlquery is nil"))
+			return
+		}
+		var res []map[string]interface{}
+		result, err := sess.Query(op.SqlQuery)
+		for _, re := range result {
+			mm := make(map[string]interface{})
+			for k, v := range re {
+				nv := string(v)
+				nt, err := time.Parse(time.RFC3339, nv)
+				if err == nil {
+					mm[k] = nt
+				} else {
+					ff, err := strconv.ParseFloat(nv, 64)
+					if err == nil {
+						mm[k] = ff
+					} else {
+						mm[k] = nv
+					}
+				}
+			}
+			res = append(res, mm)
+		}
+		if err == nil {
+			d.SendOk(client, &op, res, len(res), nil)
+		} else {
+			d.SendOk(client, &op, nil, 0, err)
+		}
+	default:
+		d.SendOk(client, &op, nil, 0, errors.New("invail op"))
 	}
 }
 

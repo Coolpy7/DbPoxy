@@ -1,20 +1,38 @@
 {
-  "database_type": "mongodb",
+  "database_type": "mysql",
   "enable": true,
-  "inject": "$",
+  "inject": "=",
   "cmd": [
     {
-      "db_name": "DbPoxyTestDB",
-      "table_name": "test",
+      "db_name": "ldh",
+      "table_name": "users",
       "op_name": "insert",
-      "inject": "and",
+      "inject": "=",
       "cmd_id": 1,
       "value": {
-        "datetime": "{0}",
-        "number": "{1}",
-        "string": "{2}"
+        "sql_exec": "INSERT INTO users(age, name, num, createat) VALUES ({0}, {1}, {2}, {3})"
       },
-      "param_count": 3
-    }
+      "param_count": 4
+    },
+    {
+      "db_name": "ldh",
+      "table_name":"users",
+      "op_name":"query",
+      "cmd_id": 2,
+      "value": {
+        "sql_query":"SELECT * FROM users;"
+      },
+      "param_count": 0
+    },
+    {
+      "db_name": "ldh",
+      "table_name":"users",
+      "op_name":"work",
+      "cmd_id": 3,
+      "sql_works":[
+        {"table_name":"users", "work":"INSERT INTO users(age, name, num) VALUES ({0}, {1}, {2})","id_alias":"insertid"},
+        {"table_name":"users", "work":"UPDATE users SET age=8, name={3}  WHERE id=insertid"},
+        {"table_name":"users", "work":"DELETE FROM users WHERE id=insertid"}
+      ]}
   ]
 }
