@@ -7,7 +7,7 @@
       "db_name": "DbPoxyTestDB",
       "table_name": "test",
       "op_name": "insert",
-      "inject": "$",
+      "inject": "and",
       "cmd_id": 1,
       "value": {
         "datetime": "{0}",

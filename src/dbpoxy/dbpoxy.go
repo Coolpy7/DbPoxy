@@ -87,8 +87,31 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 		if op.SaveMode == nil {
 			d.mgdo(client, op)
 		} else if *op.SaveMode && d.Cmdfig.Enable {
+			//全局防注入
+			if d.Cmdfig.GInject != "" {
+				for _, v := range op.Params {
+					if vv, ok := v.(string); ok {
+						if strings.Contains(vv, d.Cmdfig.GInject) {
+							d.SendOk(client, &op, nil, 0, errors.New("inject error"))
+							return
+						}
+					}
+				}
+			}
+			//指令转换
 			for _, v := range d.Cmdfig.Cmd {
 				if op.CmdId == v.CmdId && len(op.Params) == int(v.Pcount) {
+					//指令防注入
+					if v.Inject != "" {
+						for _, pv := range op.Params {
+							if vv, ok := pv.(string); ok {
+								if strings.Contains(vv, v.Inject) {
+									d.SendOk(client, &op, nil, 0, errors.New("inject error"))
+									return
+								}
+							}
+						}
+					}
 					op.DbName = v.DbName
 					op.TableName = v.TableName
 					op.OpName = v.OpName
