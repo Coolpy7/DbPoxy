@@ -1,6 +1,6 @@
 {
   "database_type": "mysql",
-  "enable": true,
+  "enable": false,
   "inject": "=",
   "cmd": [
     {
@@ -30,9 +30,11 @@
       "op_name":"work",
       "cmd_id": 3,
       "sql_works":[
-        {"table_name":"users", "work":"INSERT INTO users(age, name, num) VALUES ({0}, {1}, {2})","id_alias":"insertid"},
-        {"table_name":"users", "work":"UPDATE users SET age=8, name={3}  WHERE id=insertid"},
+        {"table_name":"users", "work":"INSERT INTO users(age, name, num, createat) VALUES ({0}, {1}, {2}, {3})","id_alias":"insertid"},
+        {"table_name":"users", "work":"UPDATE users SET age={4}, name={5}  WHERE id=insertid"},
         {"table_name":"users", "work":"DELETE FROM users WHERE id=insertid"}
-      ]}
+      ],
+      "param_count": 6
+    }
   ]
 }

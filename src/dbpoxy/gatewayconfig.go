@@ -33,5 +33,6 @@ type PureCmd struct {
 	Inject    string                 `json:"inject"`
 	CmdId     uint32                 `json:"cmd_id"`
 	Value     map[string]interface{} `json:"value"`
+	SqlWorks  []SqlWork              `json:"sql_works,omitempty" msgpack:"sql_works,omitempty"`
 	Pcount    uint32                 `json:"param_count"`
 }

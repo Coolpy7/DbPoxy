@@ -141,33 +141,21 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 		} else if *op.SaveMode && d.Cmdfig.Enable {
 			//全局防注入
 			if d.Cmdfig.GInject != "" {
-				gis := strings.Split(d.Cmdfig.GInject, ",")
-				for _, v := range op.Params {
-					if vv, ok := v.(string); ok {
-						for _, gv := range gis {
-							if strings.Contains(vv, gv) {
-								d.SendOk(client, &op, nil, 0, errors.New("inject error"))
-								return
-							}
-						}
-					}
+				err := d.inject(d.Cmdfig.GInject, op.Params)
+				if err != nil {
+					d.SendOk(client, &op, nil, 0, errors.New("inject error"))
+					return
 				}
 			}
 			//指令转换
 			for _, v := range d.Cmdfig.Cmd {
-				if op.CmdId == v.CmdId && len(op.Params) == int(v.Pcount) {
+				if op.CmdId == v.CmdId { //&& len(op.Params) == int(v.Pcount)
 					//指令防注入
 					if v.Inject != "" {
-						gis := strings.Split(v.Inject, ",")
-						for _, pv := range op.Params {
-							if vv, ok := pv.(string); ok {
-								for _, gv := range gis {
-									if strings.Contains(vv, gv) {
-										d.SendOk(client, &op, nil, 0, errors.New("inject error"))
-										return
-									}
-								}
-							}
+						err := d.inject(v.Inject, op.Params)
+						if err != nil {
+							d.SendOk(client, &op, nil, 0, errors.New("inject error"))
+							return
 						}
 					}
 					op.DbName = v.DbName
@@ -176,52 +164,93 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 					switch op.OpName {
 					case "insert", "update", "delete":
 						if vv, ok := v.Value["sql_exec"].(string); ok {
-							sql := vv
-							for pk, pv := range op.Params {
-								if reflect.TypeOf(pv).Kind() == reflect.String {
-									sql = strings.Replace(sql, pk, "'%v'", -1)
-								} else {
-									sql = strings.Replace(sql, pk, "%v", -1)
+							op.SqlExec = d.rpv(0, vv, op.Params)
+						}
+					case "work":
+						if len(v.SqlWorks) > 0 {
+							if pv, ok := op.Params["work"]; ok {
+								if lpv, ok := pv.([]interface{}); ok {
+									pcount := 0
+									for wi, sv := range v.SqlWorks {
+										if wi <= len(lpv)-1 {
+											if ipvv, ok := lpv[wi].(map[string]interface{}); ok {
+												sql := d.rpv(pcount, sv.Work, ipvv)
+												op.SqlWorks = append(op.SqlWorks, SqlWork{TableName: sv.TableName, IdAlias: sv.IdAlias, Work: sql})
+												pcount += len(ipvv)
+											} else {
+												d.SendOk(client, &op, nil, 0, errors.New("params work value error"))
+												return
+											}
+										} else {
+											op.SqlWorks = append(op.SqlWorks, sv)
+										}
+									}
+
 								}
 							}
-							itfs := make([]interface{}, 0)
-							for i := 0; i < len(op.Params); i++ {
-								itfs = append(itfs, op.Params["{"+strconv.Itoa(i)+"}"])
-							}
-							sql = fmt.Sprintf(sql, itfs...)
-							op.SqlExec = sql
 						}
 					case "query":
 						if vv, ok := v.Value["sql_query"].(string); ok {
-							sql := vv
-							for pk, pv := range op.Params {
-								if reflect.TypeOf(pv).Kind() == reflect.String {
-									sql = strings.Replace(sql, pk, "'%v'", -1)
-								} else {
-									sql = strings.Replace(sql, pk, "%v", -1)
-								}
-							}
-							itfs := make([]interface{}, 0)
-							for i := 0; i < len(op.Params); i++ {
-								itfs = append(itfs, op.Params["{"+strconv.Itoa(i)+"}"])
-							}
-							sql = fmt.Sprintf(sql, itfs...)
-							op.SqlQuery = sql
+							op.SqlQuery = d.rpv(0, vv, op.Params)
 						}
 					default:
 						d.SendOk(client, &op, nil, 0, errors.New("op error"))
 						return
 					}
 					d.sqldo(client, op)
-				} else {
-					d.SendOk(client, &op, nil, 0, errors.New("save mode params count error"))
-					return
 				}
 			}
 		}
 	} else if d.Config.DatabaseType == "oss-gridfs" {
 		d.ssodo(client, op)
 	}
+}
+
+func (d *DbPoxy) inject(inject string, params map[string]interface{}) error {
+	gis := strings.Split(inject, ",")
+	for _, v := range params {
+		if reflect.TypeOf(v).Kind() == reflect.Slice {
+			for _, mv := range v.([]interface{}) {
+				if reflect.TypeOf(mv).Kind() == reflect.Map {
+					m := mv.(map[string]interface{})
+					for _, sv := range m {
+						if vv, ok := sv.(string); ok {
+							for _, gv := range gis {
+								if strings.Contains(vv, gv) {
+									return errors.New("inject error")
+								}
+							}
+						}
+					}
+				}
+			}
+		} else {
+			if vv, ok := v.(string); ok {
+				for _, gv := range gis {
+					if strings.Contains(vv, gv) {
+						return errors.New("inject error")
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (d *DbPoxy) rpv(startpindex int, sql string, params map[string]interface{}) string {
+	for pk, pv := range params {
+		if reflect.TypeOf(pv).Kind() == reflect.String {
+			sql = strings.Replace(sql, pk, "'%v'", -1)
+		} else {
+			sql = strings.Replace(sql, pk, "%v", -1)
+		}
+	}
+	itfs := make([]interface{}, 0)
+	for i := 0; i < len(params); i++ {
+		idx := strconv.Itoa(i + startpindex)
+		itfs = append(itfs, params["{"+idx+"}"])
+	}
+	return fmt.Sprintf(sql, itfs...)
 }
 
 func (d *DbPoxy) ssodo(client MQTT.Client, op Operation) {
@@ -336,14 +365,14 @@ func (d *DbPoxy) sqldo(client MQTT.Client, op Operation) {
 						ref, err := ss.Exec(v.Work)
 						if err != nil {
 							res[idx] = err.Error()
-							ss.Rollback()
+							_ = ss.Rollback()
 							haserr = err
 							break
 						}
 						nid, err := ref.LastInsertId()
 						if err != nil {
 							var nids []int64
-							sess.SQL("SELECT MAX(id) FROM " + v.TableName).Find(&nids)
+							_ = sess.SQL("SELECT MAX(id) FROM " + v.TableName).Find(&nids)
 							res[idx] = nids[0]
 							alias[v.IdAlias] = strconv.FormatInt(nids[0], 10)
 						} else {
@@ -358,7 +387,7 @@ func (d *DbPoxy) sqldo(client MQTT.Client, op Operation) {
 						ref, err := sess.Exec(work)
 						if err != nil {
 							res[idx] = err.Error()
-							ss.Rollback()
+							_ = ss.Rollback()
 							haserr = err
 							break
 						}
@@ -368,7 +397,7 @@ func (d *DbPoxy) sqldo(client MQTT.Client, op Operation) {
 				}
 			}
 			if haserr == nil {
-				ss.Commit()
+				_ = ss.Commit()
 			}
 			d.SendOk(client, &op, res, len(res), haserr)
 		}
