@@ -90,11 +90,14 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 		} else if *op.SaveMode && d.Cmdfig.Enable {
 			//全局防注入
 			if d.Cmdfig.GInject != "" {
+				gis := strings.Split(d.Cmdfig.GInject, ",")
 				for _, v := range op.Params {
 					if vv, ok := v.(string); ok {
-						if strings.Contains(vv, d.Cmdfig.GInject) {
-							d.SendOk(client, &op, nil, 0, errors.New("inject error"))
-							return
+						for _, gv := range gis {
+							if strings.Contains(vv, gv) {
+								d.SendOk(client, &op, nil, 0, errors.New("inject error"))
+								return
+							}
 						}
 					}
 				}
@@ -104,11 +107,14 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 				if op.CmdId == v.CmdId && len(op.Params) == int(v.Pcount) {
 					//指令防注入
 					if v.Inject != "" {
+						gis := strings.Split(v.Inject, ",")
 						for _, pv := range op.Params {
 							if vv, ok := pv.(string); ok {
-								if strings.Contains(vv, v.Inject) {
-									d.SendOk(client, &op, nil, 0, errors.New("inject error"))
-									return
+								for _, gv := range gis {
+									if strings.Contains(vv, gv) {
+										d.SendOk(client, &op, nil, 0, errors.New("inject error"))
+										return
+									}
 								}
 							}
 						}
@@ -135,11 +141,14 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 		} else if *op.SaveMode && d.Cmdfig.Enable {
 			//全局防注入
 			if d.Cmdfig.GInject != "" {
+				gis := strings.Split(d.Cmdfig.GInject, ",")
 				for _, v := range op.Params {
 					if vv, ok := v.(string); ok {
-						if strings.Contains(vv, d.Cmdfig.GInject) {
-							d.SendOk(client, &op, nil, 0, errors.New("inject error"))
-							return
+						for _, gv := range gis {
+							if strings.Contains(vv, gv) {
+								d.SendOk(client, &op, nil, 0, errors.New("inject error"))
+								return
+							}
 						}
 					}
 				}
@@ -149,11 +158,14 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 				if op.CmdId == v.CmdId && len(op.Params) == int(v.Pcount) {
 					//指令防注入
 					if v.Inject != "" {
+						gis := strings.Split(v.Inject, ",")
 						for _, pv := range op.Params {
 							if vv, ok := pv.(string); ok {
-								if strings.Contains(vv, v.Inject) {
-									d.SendOk(client, &op, nil, 0, errors.New("inject error"))
-									return
+								for _, gv := range gis {
+									if strings.Contains(vv, gv) {
+										d.SendOk(client, &op, nil, 0, errors.New("inject error"))
+										return
+									}
 								}
 							}
 						}
@@ -179,8 +191,23 @@ func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
 							sql = fmt.Sprintf(sql, itfs...)
 							op.SqlExec = sql
 						}
-					//case "query":
-					//	op.SqlQuery = v1.(string)
+					case "query":
+						if vv, ok := v.Value["sql_query"].(string); ok {
+							sql := vv
+							for pk, pv := range op.Params {
+								if reflect.TypeOf(pv).Kind() == reflect.String {
+									sql = strings.Replace(sql, pk, "'%v'", -1)
+								} else {
+									sql = strings.Replace(sql, pk, "%v", -1)
+								}
+							}
+							itfs := make([]interface{}, 0)
+							for i := 0; i < len(op.Params); i++ {
+								itfs = append(itfs, op.Params["{"+strconv.Itoa(i)+"}"])
+							}
+							sql = fmt.Sprintf(sql, itfs...)
+							op.SqlQuery = sql
+						}
 					default:
 						d.SendOk(client, &op, nil, 0, errors.New("op error"))
 						return
