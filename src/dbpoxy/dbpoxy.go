@@ -11,14 +11,14 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/go-xorm/xorm"
 	_ "github.com/lib/pq"
-	"github.com/mongodb/mongo-go-driver/bson"
-	"github.com/mongodb/mongo-go-driver/bson/primitive"
-	"github.com/mongodb/mongo-go-driver/mongo"
-	"github.com/mongodb/mongo-go-driver/mongo/gridfs"
-	"github.com/mongodb/mongo-go-driver/mongo/options"
-	"github.com/mongodb/mongo-go-driver/mongo/readpref"
-	"github.com/mongodb/mongo-go-driver/x/bsonx"
 	"github.com/pquerna/ffjson/ffjson"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/gridfs"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/x/bsonx"
 	"gopkg.in/h2non/filetype.v1"
 	"gopkg.in/vmihailenco/msgpack.v2"
 	"gopkg.in/yaml.v2"
@@ -621,7 +621,7 @@ func (d *DbPoxy) ParseConfig(filename string) error {
 	d.Config = &config
 
 	if d.Config.DatabaseType == "mongodb" || d.Config.DatabaseType == "oss-gridfs" {
-		d.Mongo, err = mongo.NewClient(config.DatabaseConnectionString)
+		d.Mongo, err = mongo.NewClient(options.Client().ApplyURI(config.DatabaseConnectionString))
 		if err != nil {
 			return err
 		}
