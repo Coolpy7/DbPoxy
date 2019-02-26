@@ -22,6 +22,7 @@ type Operation struct {
 	OssFileName   string                 `json:"oss_file_name,omitempty" msgpack:"oss_file_name,omitempty"`
 	OssFileBase64 string                 `json:"oss_file_base64,omitempty" msgpack:"oss_file_base64,omitempty"` //base, hex
 	OssFileHex    []byte                 `json:"oss_file_hex,omitempty" msgpack:"oss_file_hex,omitempty"`
+	MongoWorks    []MongoWork            `json:"mongo_works,omitempty" msgpack:"mongo_works,omitempty"`
 	//安全模式
 	SaveMode *bool                  `json:"save_mode,omitempty" msgpack:"save_mode,omitempty"`
 	CmdId    uint32                 `json:"cmd_id,omitempty" msgpack:"cmd_id,omitempty"`
@@ -32,4 +33,11 @@ type SqlWork struct {
 	TableName string `json:"table_name,omitempty" msgpack:"table_name,omitempty"`
 	Work      string `json:"work,omitempty" msgpack:"work,omitempty"`
 	IdAlias   string `json:"id_alias,omitempty" msgpack:"id_alias,omitempty"`
+}
+
+type MongoWork struct {
+	TableName string                 `json:"table_name,omitempty" msgpack:"table_name,omitempty"`
+	Work      map[string]interface{} `json:"work,omitempty" msgpack:"work,omitempty"`
+	IdAlias   string                 `json:"id_alias,omitempty" msgpack:"id_alias,omitempty"`
+	OpName    string                 `json:"op_name,omitempty" msgpack:"op_name,omitempty"` //insert, update, delete, query
 }
