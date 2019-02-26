@@ -447,7 +447,11 @@ func (d *DbPoxy) mgdo(client MQTT.Client, op Operation) {
 		LoopParseDatetimeOrOid(op.Value, false, "", nil)
 		op.Value["createat"] = time.Now().Local()
 		res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).InsertOne(context.Background(), op.Value)
-		d.SendOk(client, &op, res.InsertedID, 1, err)
+		if err != nil {
+			d.SendOk(client, &op, nil, 0, err)
+		} else {
+			d.SendOk(client, &op, res.InsertedID, 1, err)
+		}
 	case "update":
 		if op.Value == nil {
 			d.SendOk(client, &op, nil, 0, errors.New("value is nil"))
@@ -459,63 +463,96 @@ func (d *DbPoxy) mgdo(client MQTT.Client, op Operation) {
 		if err == nil {
 			filter := bson.M{"_id": findid}
 			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).UpdateOne(context.Background(), filter, bson.M{"$set": op.Value})
-			d.SendOk(client, &op, nil, int(res.ModifiedCount), err)
+			if err != nil {
+				d.SendOk(client, &op, nil, 0, err)
+			} else {
+				d.SendOk(client, &op, nil, int(res.ModifiedCount), err)
+			}
 		} else {
 			LoopParseDatetimeOrOid(op.Filter, false, "", nil)
 			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).UpdateMany(context.Background(), op.Filter, bson.M{"$set": op.Value})
-			d.SendOk(client, &op, nil, int(res.ModifiedCount), err)
+			if err != nil {
+				d.SendOk(client, &op, nil, 0, err)
+			} else {
+				d.SendOk(client, &op, nil, int(res.ModifiedCount), err)
+			}
 		}
 	case "delete":
 		findid, err := primitive.ObjectIDFromHex(op.FilterId)
 		if err == nil {
 			filter := bson.M{"_id": findid}
 			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).DeleteOne(context.Background(), filter)
-			d.SendOk(client, &op, nil, int(res.DeletedCount), err)
+			if err != nil {
+				d.SendOk(client, &op, nil, 0, err)
+			} else {
+				d.SendOk(client, &op, nil, int(res.DeletedCount), err)
+			}
 		} else {
 			LoopParseDatetimeOrOid(op.Filter, false, "", nil)
 			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).DeleteMany(context.Background(), op.Filter)
-			d.SendOk(client, &op, nil, int(res.DeletedCount), err)
+			if err != nil {
+				d.SendOk(client, &op, nil, 0, err)
+			} else {
+				d.SendOk(client, &op, nil, int(res.DeletedCount), err)
+			}
 		}
 	case "work":
 		if len(op.MongoWorks) > 0 {
-			var haserr error
 			res := make(map[int]interface{})
 			alias := make(map[string]interface{})
-			col := d.Mongo.Database(op.DbName).Collection(op.TableName)
 			_ = d.Mongo.UseSession(context.Background(), func(sessionContext mongo.SessionContext) error {
+				err := sessionContext.StartTransaction()
+				if err != nil {
+					return err
+				}
 				for idx, v := range op.MongoWorks {
 					if v.Work != nil {
+						//跨文档事务
+						col := d.Mongo.Database(op.DbName).Collection(op.TableName)
 						if v.OpName == "insert" {
 							LoopParseDatetimeOrOid(v.Work, false, "", nil)
-							op.Value["createat"] = time.Now().Local()
-							err := sessionContext.StartTransaction()
-							if err != nil {
-								return err
-							}
-							nr, err := col.InsertOne(sessionContext, op.Value)
+							v.Work["createat"] = time.Now().Local()
+							nr, err := col.InsertOne(sessionContext, v.Work)
 							if err != nil {
 								_ = sessionContext.AbortTransaction(sessionContext)
 								return err
 							}
-							alias[v.IdAlias] = nr.InsertedID
-							res[idx] = nr.InsertedID
-						} else {
+							oid, ok := nr.InsertedID.(primitive.ObjectID)
+							if !ok {
+								_ = sessionContext.AbortTransaction(sessionContext)
+								return err
+							}
+							alias[v.IdAlias] = oid.Hex()
+							res[idx] = oid.Hex()
+						} else if v.OpName == "update" {
 							for k, vv := range alias {
 								LoopParseDatetimeOrOid(v.Work, true, k, vv)
 							}
-							ref, err := col.Aggregate(sessionContext, v.Work)
+							v.Work["updateat"] = time.Now().Local()
+							nr, err := col.UpdateMany(sessionContext, v.Work["filter"], v.Work["value"])
 							if err != nil {
 								_ = sessionContext.AbortTransaction(sessionContext)
-								res[idx] = err.Error()
-								haserr = err
-								break
+								return err
 							}
-							changes := ref.Current.Lookup("changes")
-							res[idx] = changes
+							res[idx] = nr.MatchedCount
+						} else if v.OpName == "delete" {
+							for k, vv := range alias {
+								LoopParseDatetimeOrOid(v.Work, true, k, vv)
+							}
+							nr, err := col.DeleteMany(sessionContext, v.Work["filter"])
+							if err != nil {
+								_ = sessionContext.AbortTransaction(sessionContext)
+								return err
+							}
+							res[idx] = nr.DeletedCount
 						}
 					}
 				}
-				_ = sessionContext.CommitTransaction(sessionContext)
+				err = sessionContext.CommitTransaction(sessionContext)
+				if err != nil {
+					d.SendOk(client, &op, nil, 0, err)
+				}
+				d.SendOk(client, &op, res, len(res), err)
 				return nil
 			})
 		}
@@ -566,7 +603,7 @@ func LoopParseDatetimeOrOid(inobj interface{}, isReplace bool, rkey string, rval
 		o := obj.Interface().(map[string]interface{})
 		for k, v := range o {
 			if isReplace {
-				if k == rkey {
+				if v == rkey {
 					v = rval
 				}
 			}

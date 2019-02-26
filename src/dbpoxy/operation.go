@@ -39,5 +39,5 @@ type MongoWork struct {
 	TableName string                 `json:"table_name,omitempty" msgpack:"table_name,omitempty"`
 	Work      map[string]interface{} `json:"work,omitempty" msgpack:"work,omitempty"`
 	IdAlias   string                 `json:"id_alias,omitempty" msgpack:"id_alias,omitempty"`
-	OpName    string                 `json:"op_name,omitempty" msgpack:"op_name,omitempty"` //insert, update, delete, query
+	OpName    string                 `json:"op_name,omitempty" msgpack:"op_name,omitempty"` //insert, update, delete, query, aggregate
 }
