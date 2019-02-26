@@ -18,6 +18,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/gridfs"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 	"go.mongodb.org/mongo-driver/x/bsonx"
 	"gopkg.in/h2non/filetype.v1"
 	"gopkg.in/vmihailenco/msgpack.v2"
@@ -443,7 +444,7 @@ func (d *DbPoxy) mgdo(client MQTT.Client, op Operation) {
 			d.SendOk(client, &op, nil, 0, errors.New("value is nil"))
 			return
 		}
-		LoopParseDatetimeOrOid(op.Value)
+		LoopParseDatetimeOrOid(op.Value, false, "", nil)
 		op.Value["createat"] = time.Now().Local()
 		res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).InsertOne(context.Background(), op.Value)
 		d.SendOk(client, &op, res.InsertedID, 1, err)
@@ -452,7 +453,7 @@ func (d *DbPoxy) mgdo(client MQTT.Client, op Operation) {
 			d.SendOk(client, &op, nil, 0, errors.New("value is nil"))
 			return
 		}
-		LoopParseDatetimeOrOid(op.Value)
+		LoopParseDatetimeOrOid(op.Value, false, "", nil)
 		op.Value["updateat"] = time.Now().Local()
 		findid, err := primitive.ObjectIDFromHex(op.FilterId)
 		if err == nil {
@@ -460,7 +461,7 @@ func (d *DbPoxy) mgdo(client MQTT.Client, op Operation) {
 			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).UpdateOne(context.Background(), filter, bson.M{"$set": op.Value})
 			d.SendOk(client, &op, nil, int(res.ModifiedCount), err)
 		} else {
-			LoopParseDatetimeOrOid(op.Filter)
+			LoopParseDatetimeOrOid(op.Filter, false, "", nil)
 			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).UpdateMany(context.Background(), op.Filter, bson.M{"$set": op.Value})
 			d.SendOk(client, &op, nil, int(res.ModifiedCount), err)
 		}
@@ -471,9 +472,52 @@ func (d *DbPoxy) mgdo(client MQTT.Client, op Operation) {
 			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).DeleteOne(context.Background(), filter)
 			d.SendOk(client, &op, nil, int(res.DeletedCount), err)
 		} else {
-			LoopParseDatetimeOrOid(op.Filter)
+			LoopParseDatetimeOrOid(op.Filter, false, "", nil)
 			res, err := d.Mongo.Database(op.DbName).Collection(op.TableName).DeleteMany(context.Background(), op.Filter)
 			d.SendOk(client, &op, nil, int(res.DeletedCount), err)
+		}
+	case "work":
+		if len(op.MongoWorks) > 0 {
+			var haserr error
+			res := make(map[int]interface{})
+			alias := make(map[string]interface{})
+			col := d.Mongo.Database(op.DbName).Collection(op.TableName)
+			_ = d.Mongo.UseSession(context.Background(), func(sessionContext mongo.SessionContext) error {
+				for idx, v := range op.MongoWorks {
+					if v.Work != nil {
+						if v.OpName == "insert" {
+							LoopParseDatetimeOrOid(v.Work, false, "", nil)
+							op.Value["createat"] = time.Now().Local()
+							err := sessionContext.StartTransaction()
+							if err != nil {
+								return err
+							}
+							nr, err := col.InsertOne(sessionContext, op.Value)
+							if err != nil {
+								_ = sessionContext.AbortTransaction(sessionContext)
+								return err
+							}
+							alias[v.IdAlias] = nr.InsertedID
+							res[idx] = nr.InsertedID
+						} else {
+							for k, vv := range alias {
+								LoopParseDatetimeOrOid(v.Work, true, k, vv)
+							}
+							ref, err := col.Aggregate(sessionContext, v.Work)
+							if err != nil {
+								_ = sessionContext.AbortTransaction(sessionContext)
+								res[idx] = err.Error()
+								haserr = err
+								break
+							}
+							changes := ref.Current.Lookup("changes")
+							res[idx] = changes
+						}
+					}
+				}
+				_ = sessionContext.CommitTransaction(sessionContext)
+				return nil
+			})
 		}
 	case "query":
 		findid, err := primitive.ObjectIDFromHex(op.FilterId)
@@ -491,7 +535,7 @@ func (d *DbPoxy) mgdo(client MQTT.Client, op Operation) {
 				d.SendOk(client, &op, nil, 0, errors.New("filter pipe is nil"))
 				return
 			}
-			LoopParseDatetimeOrOid(op.FilterPipe)
+			LoopParseDatetimeOrOid(op.FilterPipe, false, "", nil)
 			var res []map[string]interface{}
 			cur, err := d.Mongo.Database(op.DbName).Collection(op.TableName).Aggregate(context.Background(), op.FilterPipe)
 			if err != nil {
@@ -516,11 +560,16 @@ func (d *DbPoxy) mgdo(client MQTT.Client, op Operation) {
 	}
 }
 
-func LoopParseDatetimeOrOid(inobj interface{}) {
+func LoopParseDatetimeOrOid(inobj interface{}, isReplace bool, rkey string, rval interface{}) {
 	obj := reflect.ValueOf(inobj)
 	if obj.Kind() == reflect.Map {
 		o := obj.Interface().(map[string]interface{})
 		for k, v := range o {
+			if isReplace {
+				if k == rkey {
+					v = rval
+				}
+			}
 			t := reflect.ValueOf(v)
 			switch t.Kind() {
 			case reflect.String:
@@ -533,7 +582,7 @@ func LoopParseDatetimeOrOid(inobj interface{}) {
 					o[k] = id
 				}
 			case reflect.Map, reflect.Array, reflect.Slice:
-				LoopParseDatetimeOrOid(t.Interface())
+				LoopParseDatetimeOrOid(t.Interface(), isReplace, rkey, rval)
 			default:
 				o[k] = v
 			}
@@ -553,7 +602,7 @@ func LoopParseDatetimeOrOid(inobj interface{}) {
 					o[i] = id
 				}
 			case reflect.Map, reflect.Array, reflect.Slice:
-				LoopParseDatetimeOrOid(t.Interface())
+				LoopParseDatetimeOrOid(t.Interface(), isReplace, rkey, rval)
 			default:
 				o[i] = v
 			}
@@ -621,7 +670,12 @@ func (d *DbPoxy) ParseConfig(filename string) error {
 	d.Config = &config
 
 	if d.Config.DatabaseType == "mongodb" || d.Config.DatabaseType == "oss-gridfs" {
-		d.Mongo, err = mongo.NewClient(options.Client().ApplyURI(config.DatabaseConnectionString))
+		ops := options.Client().ApplyURI(config.DatabaseConnectionString)
+		p := uint16(39000)
+		ops.MaxPoolSize = &p
+		ops.WriteConcern = writeconcern.New(writeconcern.J(true), writeconcern.W(1))
+		ops.ReadPreference = readpref.PrimaryPreferred()
+		d.Mongo, err = mongo.NewClient(ops)
 		if err != nil {
 			return err
 		}
@@ -667,9 +721,11 @@ func (d *DbPoxy) ParseCmdConfig(filename string) error {
 	if err != nil {
 		return err
 	}
-	d.Cmdfig = &config
-	if d.Cmdfig.DatabaseType != d.Config.DatabaseType {
-		return errors.New("database type dbpoxy.yml and cmd.json not equal")
+	if config.Enable {
+		d.Cmdfig = &config
+		if d.Cmdfig.DatabaseType != d.Config.DatabaseType {
+			return errors.New("database type dbpoxy.yml and cmd.json not equal")
+		}
 	}
 
 	return nil

@@ -1,14 +1,15 @@
 #mongodb
-#DatabaseType: mongodb
+DatabaseType: mongodb
 #DatabaseConnectionString: mongodb://localhost:27017
+DatabaseConnectionString: mongodb://root:123456@192.168.100.251:27017,192.168.100.252:27017,192.168.100.250:27017/?replicaSet=rs1&authSource=admin
 
 #postgres
 #DatabaseType: postgres #mssql mysql postgres
 #DatabaseConnectionString: host=192.168.100.187 port=13246 user=postgres dbname=ldh sslmode=disable password=123456
 
 #mysql
-DatabaseType: mysql #mssql mysql postgres
-DatabaseConnectionString: "root:123456@/ldh?charset=utf8"
+#DatabaseType: mysql #mssql mysql postgres
+#DatabaseConnectionString: "root:123456@/ldh?charset=utf8"
 
 #oss
 #DatabaseType: oss-gridfs
