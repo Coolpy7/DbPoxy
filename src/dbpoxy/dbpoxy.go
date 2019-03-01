@@ -498,17 +498,27 @@ func (d *DbPoxy) mgdo(client MQTT.Client, op Operation) {
 		}
 	case "work":
 		if len(op.MongoWorks) > 0 {
+			sess, err := d.GetSess()
+			if err != nil {
+				d.SendOk(client, &op, nil, 0, err)
+				return
+			}
+			db := d.Mongo.Database(op.DbName)
 			res := make(map[int]interface{})
 			alias := make(map[string]interface{})
-			_ = d.Mongo.UseSession(context.Background(), func(sessionContext mongo.SessionContext) error {
+			err = mongo.WithSession(context.Background(), sess, func(sessionContext mongo.SessionContext) error {
 				err := sessionContext.StartTransaction()
 				if err != nil {
 					return err
 				}
 				for idx, v := range op.MongoWorks {
 					if v.Work != nil {
+						tn, _ := db.ListCollections(context.Background(), bson.M{"name": v.TableName})
+						if tn.Next(context.Background()) == false {
+							db.RunCommand(context.Background(), bson.D{{"create", v.TableName}})
+						}
+						col := db.Collection(v.TableName)
 						//跨文档事务
-						col := d.Mongo.Database(op.DbName).Collection(op.TableName)
 						if v.OpName == "insert" {
 							LoopParseDatetimeOrOid(v.Work, false, "", nil)
 							v.Work["createat"] = time.Now().Local()
@@ -545,16 +555,35 @@ func (d *DbPoxy) mgdo(client MQTT.Client, op Operation) {
 								return err
 							}
 							res[idx] = nr.DeletedCount
+						} else if v.OpName == "query" {
+							for k, vv := range alias {
+								LoopParseDatetimeOrOid(v.Work, true, k, vv)
+							}
+							var objs []map[string]interface{}
+							nr, err := col.Find(sessionContext, v.Work["filter"])
+							if err != nil {
+								_ = sessionContext.AbortTransaction(sessionContext)
+								return err
+							}
+							for nr.Next(context.Background()) {
+								var m map[string]interface{}
+								_ = nr.Decode(&m)
+								objs = append(objs, m)
+							}
+							res[idx] = objs
 						}
 					}
 				}
 				err = sessionContext.CommitTransaction(sessionContext)
 				if err != nil {
-					d.SendOk(client, &op, nil, 0, err)
+					return err
 				}
 				d.SendOk(client, &op, res, len(res), err)
 				return nil
 			})
+			if err != nil {
+				d.SendOk(client, &op, nil, 0, err)
+			}
 		}
 	case "query":
 		findid, err := primitive.ObjectIDFromHex(op.FilterId)
@@ -692,6 +721,14 @@ func (d *DbPoxy) SendOk(client MQTT.Client, op *Operation, data interface{}, cha
 	}
 	bts, _ := ffjson.Marshal(&nop)
 	client.Publish(tp, op.RefQos, false, bts)
+}
+
+func (d *DbPoxy) GetSess() (mongo.Session, error) {
+	session, err := d.Mongo.StartSession(options.Session().SetDefaultReadPreference(readpref.Primary()))
+	if err != nil {
+		return nil, err
+	}
+	return session, nil
 }
 
 func (d *DbPoxy) ParseConfig(filename string) error {
