@@ -78,16 +78,20 @@ func main() {
 		AddBroker("tcp://" + poxy.Config.BrokerHost + ":" + strconv.Itoa(poxy.Config.BrokerPort)).
 		SetClientID(poxy.Config.BrokerClientId).SetUsername(poxy.Config.BrokerUser).SetPassword(poxy.Config.BrokerPassword).
 		SetAutoReconnect(true).SetMaxReconnectInterval(2 * time.Second).SetCleanSession(poxy.Config.BrokerClearSession)
+	opts.SetDefaultPublishHandler(func(client MQTT.Client, msg MQTT.Message) {
+		poxy.Choke <- dbpoxy.DbProxyMessage{Client: client, Message: msg}
+	})
 	c := MQTT.NewClient(opts)
 	if token := c.Connect(); token.Wait() && token.Error() != nil {
 		log.Println("start error", token.Error())
 		return
 	}
 
-	if token := c.Subscribe(poxy.Config.OpTopics.Topic, poxy.Config.OpTopics.Qos, poxy.BrokerLoadHandler); token.Wait() && token.Error() != nil {
+	if token := c.Subscribe(poxy.Config.OpTopics.Topic, poxy.Config.OpTopics.Qos, nil); token.Wait() && token.Error() != nil {
 		log.Println("start error", token.Error())
 		return
 	} else {
+		go poxy.Run()
 		log.Println(poxy.Config.OpTopics.Topic, "OK, token:", poxy.Config.AccessToken)
 	}
 
@@ -96,6 +100,7 @@ func main() {
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		for range signalChan {
+			poxy.Quit <- true
 			if c.IsConnected() {
 				c.Disconnect(5)
 			}

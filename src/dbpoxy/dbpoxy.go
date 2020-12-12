@@ -26,6 +26,7 @@ import (
 	"io/ioutil"
 	"log"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -39,10 +40,15 @@ type DbPoxy struct {
 	Sqldb   *xorm.Engine
 	jsonpre byte
 	jsonend byte
+	Quit    chan bool
+	Choke   chan DbProxyMessage
 }
 
 func NewDbPoxy() *DbPoxy {
-	poxy := &DbPoxy{}
+	poxy := &DbPoxy{
+		Quit:  make(chan bool),
+		Choke: make(chan DbProxyMessage),
+	}
 	poxy.jsonpre = byte('{')
 	poxy.jsonend = byte('}')
 	return poxy
@@ -57,7 +63,20 @@ func (d *DbPoxy) Close() {
 	}
 }
 
-func (d *DbPoxy) BrokerLoadHandler(client MQTT.Client, msg MQTT.Message) {
+func (d *DbPoxy) Run() {
+	for {
+		select {
+		case incoming := <-d.Choke:
+			d.mqttHandler(incoming.Client, incoming.Message)
+		case <-d.Quit:
+			return
+		default:
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+}
+
+func (d *DbPoxy) mqttHandler(client MQTT.Client, msg MQTT.Message) {
 	var op Operation
 	payload := msg.Payload()
 	if len(payload) == 0 {
@@ -745,7 +764,7 @@ func (d *DbPoxy) ParseConfig(filename string) error {
 
 	if d.Config.DatabaseType == "mongodb" || d.Config.DatabaseType == "oss-gridfs" {
 		ops := options.Client().ApplyURI(config.DatabaseConnectionString)
-		p := uint16(39000)
+		p := uint16(runtime.NumCPU() * 2)
 		ops.MaxPoolSize = &p
 		ops.WriteConcern = writeconcern.New(writeconcern.J(true), writeconcern.W(1))
 		ops.ReadPreference = readpref.PrimaryPreferred()
@@ -753,7 +772,7 @@ func (d *DbPoxy) ParseConfig(filename string) error {
 		if err != nil {
 			return err
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		err = d.Mongo.Connect(ctx)
 		if err != nil {
@@ -762,6 +781,7 @@ func (d *DbPoxy) ParseConfig(filename string) error {
 		err = d.Mongo.Ping(ctx, readpref.PrimaryPreferred())
 		if err != nil {
 			log.Println(d.Config.DatabaseType, "ping err", err.Error())
+			return err
 		} else {
 			log.Println(d.Config.DatabaseType, "ping ok")
 		}
@@ -771,10 +791,11 @@ func (d *DbPoxy) ParseConfig(filename string) error {
 			return err
 		}
 		d.Sqldb.TZLocation, _ = time.LoadLocation("Asia/Shanghai")
-		d.Sqldb.DB().SetMaxIdleConns(400)
-		d.Sqldb.DB().SetMaxOpenConns(4000)
+		d.Sqldb.DB().SetMaxIdleConns(runtime.NumCPU() * 2)
+		d.Sqldb.DB().SetMaxOpenConns(runtime.NumCPU() * 2)
 		if err = d.Sqldb.DB().Ping(); err != nil {
 			log.Println(d.Config.DatabaseType, "ping err", err.Error())
+			return err
 		} else {
 			log.Println(d.Config.DatabaseType, "ping ok")
 		}

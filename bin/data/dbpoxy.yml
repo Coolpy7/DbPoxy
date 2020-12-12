@@ -1,7 +1,7 @@
 #mongodb
 DatabaseType: mongodb
-#DatabaseConnectionString: mongodb://localhost:27017
-DatabaseConnectionString: mongodb://root:123456@192.168.100.251:27017,192.168.100.252:27017,192.168.100.250:27017/?replicaSet=rs1&authSource=admin
+DatabaseConnectionString: mongodb://localhost:27017
+#DatabaseConnectionString: mongodb://user:pass@192.168.100.251:27017,192.168.100.252:27017,192.168.100.250:27017/?replicaSet=rs1&authSource=admin
 
 #postgres
 #DatabaseType: postgres #mssql mysql postgres
