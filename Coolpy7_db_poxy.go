@@ -1,9 +1,9 @@
 package main
 
 import (
-	"dbpoxy"
 	"errors"
 	"flag"
+	"github.com/Coolpy7/DbPoxy/src/dbpoxy"
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 	"io"
 	"log"

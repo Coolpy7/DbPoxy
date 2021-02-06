@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/Coolpy7/DbPoxy/src/topic"
 	_ "github.com/denisenkom/go-mssqldb"
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 	_ "github.com/go-sql-driver/mysql"
@@ -30,7 +31,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"topic"
 )
 
 type DbPoxy struct {
@@ -764,7 +764,7 @@ func (d *DbPoxy) ParseConfig(filename string) error {
 
 	if d.Config.DatabaseType == "mongodb" || d.Config.DatabaseType == "oss-gridfs" {
 		ops := options.Client().ApplyURI(config.DatabaseConnectionString)
-		p := uint16(runtime.NumCPU() * 2)
+		p := uint64(runtime.NumCPU() * 2)
 		ops.MaxPoolSize = &p
 		ops.WriteConcern = writeconcern.New(writeconcern.J(true), writeconcern.W(1))
 		ops.ReadPreference = readpref.PrimaryPreferred()
