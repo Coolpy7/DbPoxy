@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/Coolpy7/DbPoxy/src/topic"
@@ -12,7 +13,6 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/go-xorm/xorm"
 	_ "github.com/lib/pq"
-	"github.com/pquerna/ffjson/ffjson"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -84,7 +84,7 @@ func (d *DbPoxy) mqttHandler(client MQTT.Client, msg MQTT.Message) {
 		return
 	}
 	if payload[0] == d.jsonpre && payload[len(payload)-1] == d.jsonend {
-		err := ffjson.Unmarshal(payload, &op)
+		err := json.Unmarshal(payload, &op)
 		if err != nil {
 			log.Println("error payload json unmarshal", string(payload))
 			return
@@ -738,7 +738,7 @@ func (d *DbPoxy) SendOk(client MQTT.Client, op *Operation, data interface{}, cha
 	if op.RefQos < 0 || op.RefQos > 2 {
 		op.RefQos = 0
 	}
-	bts, _ := ffjson.Marshal(&nop)
+	bts, _ := json.Marshal(&nop)
 	client.Publish(tp, op.RefQos, false, bts)
 }
 
@@ -812,7 +812,7 @@ func (d *DbPoxy) ParseCmdConfig(filename string) error {
 	if err != nil {
 		return err
 	}
-	err = ffjson.Unmarshal(jsonStr, &config)
+	err = json.Unmarshal(jsonStr, &config)
 	if err != nil {
 		return err
 	}
