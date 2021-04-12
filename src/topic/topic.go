@@ -1,65 +1,80 @@
-// Package topic implements common methods to handle MQTT topics.
 package topic
 
 import (
 	"errors"
-	"regexp"
 	"strings"
 )
 
-// ErrZeroLength is returned by Parse if a topics has a zero length.
 var ErrZeroLength = errors.New("zero length topic")
-
-// ErrWildcards is returned by Parse if a topic contains invalid wildcards.
 var ErrWildcards = errors.New("invalid use of wildcards")
 
-var multiSlashRegex = regexp.MustCompile(`/+`)
+func trimSlash(r rune) bool {
+	return r == '/'
+}
 
-// Parse removes duplicate and trailing slashes from the supplied
-// string and returns the normalized topic.
 func Parse(topic string, allowWildcards bool) (string, error) {
-	// check for zero length
 	if topic == "" {
 		return "", ErrZeroLength
 	}
 
-	// normalize topic
-	topic = multiSlashRegex.ReplaceAllString(topic, "/")
+	if hasAdjacentSlashes(topic) {
+		topic = collapseSlashes(topic)
+	}
 
-	// remove trailing slashes
-	topic = strings.TrimRight(topic, "/")
-
-	// check again for zero length
+	topic = strings.TrimRightFunc(topic, trimSlash)
 	if topic == "" {
 		return "", ErrZeroLength
 	}
 
-	// split to segments
-	segments := strings.Split(topic, "/")
+	remainder := topic
+	segment := topicSegment(topic, "/")
 
-	// check all segments
-	for i, s := range segments {
-		// check use of wildcards
-		if (strings.Contains(s, "+") || strings.Contains(s, "#")) && len(s) > 1 {
+	for segment != topicEnd {
+		if (strings.Contains(segment, "+") || strings.Contains(segment, "#")) && len(segment) > 1 {
 			return "", ErrWildcards
 		}
 
-		// check if wildcards are allowed
-		if !allowWildcards && (s == "#" || s == "+") {
+		if !allowWildcards && (segment == "#" || segment == "+") {
 			return "", ErrWildcards
 		}
 
-		// check if hash is the last character
-		if s == "#" && i != len(segments)-1 {
+		if segment == "#" && topicShorten(remainder, "/") != topicEnd {
 			return "", ErrWildcards
 		}
+
+		remainder = topicShorten(remainder, "/")
+		segment = topicSegment(remainder, "/")
 	}
 
 	return topic, nil
 }
 
-// ContainsWildcards tests if the supplied topic contains wildcards. The topics
-// is expected to be tested and normalized using Parse beforehand.
 func ContainsWildcards(topic string) bool {
 	return strings.Contains(topic, "+") || strings.Contains(topic, "#")
+}
+
+func hasAdjacentSlashes(str string) bool {
+	var last rune
+	for _, r := range str {
+		if r == '/' && last == '/' {
+			return true
+		}
+		last = r
+	}
+
+	return false
+}
+
+func collapseSlashes(str string) string {
+	var b strings.Builder
+	var last rune
+	for _, r := range str {
+		if r == '/' && last == '/' {
+			continue
+		}
+		b.WriteRune(r)
+		last = r
+	}
+
+	return b.String()
 }

@@ -3,46 +3,47 @@ package topic
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestTreeAdd(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 
-	assert.Equal(t, 1, tree.Root.Children["foo"].Children["bar"].Values[0])
+	assert.Equal(t, 1, tree.root.children["foo"].children["bar"].values[0])
 }
 
 func TestTreeAddDuplicate(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 	tree.Add("foo/bar", 1)
 
-	assert.Equal(t, 1, len(tree.Root.Children["foo"].Children["bar"].Values))
+	assert.Equal(t, 1, len(tree.root.children["foo"].children["bar"].values))
 }
 
 func TestTreeSet(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Set("foo/bar", 1)
 
-	assert.Equal(t, 1, tree.Root.Children["foo"].Children["bar"].Values[0])
+	assert.Equal(t, 1, tree.root.children["foo"].children["bar"].values[0])
 }
 
 func TestTreeSetReplace(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Set("foo/bar", 1)
 	tree.Set("foo/bar", 2)
 
-	assert.Equal(t, 2, tree.Root.Children["foo"].Children["bar"].Values[0])
+	assert.Equal(t, 2, tree.root.children["foo"].children["bar"].values[0])
 }
 
 func TestTreeGet(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Set("foo/#", 1)
 
@@ -50,45 +51,45 @@ func TestTreeGet(t *testing.T) {
 }
 
 func TestTreeRemove(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 	tree.Remove("foo/bar", 1)
 
-	assert.Equal(t, 0, len(tree.Root.Children))
+	assert.Equal(t, 0, len(tree.root.children))
 }
 
 func TestTreeRemoveMissing(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 	tree.Remove("bar/baz", 1)
 
-	assert.Equal(t, 1, len(tree.Root.Children))
+	assert.Equal(t, 1, len(tree.root.children))
 }
 
 func TestTreeEmpty(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 	tree.Add("foo/bar", 2)
 	tree.Empty("foo/bar")
 
-	assert.Equal(t, 0, len(tree.Root.Children))
+	assert.Equal(t, 0, len(tree.root.children))
 }
 
 func TestTreeClear(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 	tree.Add("foo/bar/baz", 1)
 	tree.Clear(1)
 
-	assert.Equal(t, 0, len(tree.Root.Children))
+	assert.Equal(t, 0, len(tree.root.children))
 }
 
 func TestTreeMatchExact(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 
@@ -96,7 +97,7 @@ func TestTreeMatchExact(t *testing.T) {
 }
 
 func TestTreeMatchWildcard1(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/+", 1)
 
@@ -104,7 +105,7 @@ func TestTreeMatchWildcard1(t *testing.T) {
 }
 
 func TestTreeMatchWildcard2(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/#", 1)
 
@@ -112,7 +113,7 @@ func TestTreeMatchWildcard2(t *testing.T) {
 }
 
 func TestTreeMatchWildcard3(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/#", 1)
 
@@ -120,7 +121,7 @@ func TestTreeMatchWildcard3(t *testing.T) {
 }
 
 func TestTreeMatchWildcard4(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar/#", 1)
 
@@ -128,7 +129,7 @@ func TestTreeMatchWildcard4(t *testing.T) {
 }
 
 func TestTreeMatchWildcard5(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/#", 1)
 
@@ -136,7 +137,7 @@ func TestTreeMatchWildcard5(t *testing.T) {
 }
 
 func TestTreeMatchMultiple(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 	tree.Add("foo/+", 2)
@@ -146,7 +147,7 @@ func TestTreeMatchMultiple(t *testing.T) {
 }
 
 func TestTreeMatchNoDuplicates(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 	tree.Add("foo/+", 1)
@@ -156,7 +157,7 @@ func TestTreeMatchNoDuplicates(t *testing.T) {
 }
 
 func TestTreeMatchFirst(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/+", 1)
 
@@ -164,7 +165,7 @@ func TestTreeMatchFirst(t *testing.T) {
 }
 
 func TestTreeMatchFirstNone(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/+", 1)
 
@@ -172,7 +173,7 @@ func TestTreeMatchFirstNone(t *testing.T) {
 }
 
 func TestTreeSearchExact(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 
@@ -180,7 +181,7 @@ func TestTreeSearchExact(t *testing.T) {
 }
 
 func TestTreeSearchWildcard1(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 
@@ -188,7 +189,7 @@ func TestTreeSearchWildcard1(t *testing.T) {
 }
 
 func TestTreeSearchWildcard2(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 
@@ -196,7 +197,7 @@ func TestTreeSearchWildcard2(t *testing.T) {
 }
 
 func TestTreeSearchWildcard3(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar/baz", 1)
 
@@ -204,7 +205,7 @@ func TestTreeSearchWildcard3(t *testing.T) {
 }
 
 func TestTreeSearchWildcard4(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 
@@ -212,7 +213,7 @@ func TestTreeSearchWildcard4(t *testing.T) {
 }
 
 func TestTreeSearchWildcard5(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar/#", 1)
 
@@ -220,7 +221,7 @@ func TestTreeSearchWildcard5(t *testing.T) {
 }
 
 func TestTreeSearchMultiple(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo", 1)
 	tree.Add("foo/bar", 2)
@@ -230,7 +231,7 @@ func TestTreeSearchMultiple(t *testing.T) {
 }
 
 func TestTreeSearchNoDuplicates(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo", 1)
 	tree.Add("foo/bar", 1)
@@ -240,7 +241,7 @@ func TestTreeSearchNoDuplicates(t *testing.T) {
 }
 
 func TestTreeSearchFirst(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 
@@ -248,7 +249,7 @@ func TestTreeSearchFirst(t *testing.T) {
 }
 
 func TestTreeSearchFirstNone(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 
@@ -256,18 +257,19 @@ func TestTreeSearchFirstNone(t *testing.T) {
 }
 
 func TestTreeCount(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo", 1)
 	tree.Add("foo/bar", 2)
 	tree.Add("foo/bar/baz", 3)
 	tree.Add("foo/bar/baz", 4)
+	tree.Add("quz/bar/baz", 4)
 
-	assert.Equal(t, 4, tree.Count())
+	assert.Equal(t, 5, tree.Count())
 }
 
 func TestTreeAll(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo", 1)
 	tree.Add("foo/bar", 2)
@@ -277,7 +279,7 @@ func TestTreeAll(t *testing.T) {
 }
 
 func TestTreeAllNoDuplicates(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo", 1)
 	tree.Add("foo/bar", 1)
@@ -287,25 +289,28 @@ func TestTreeAllNoDuplicates(t *testing.T) {
 }
 
 func TestTreeReset(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	tree.Add("foo/bar", 1)
 	tree.Reset()
 
-	assert.Equal(t, 0, len(tree.Root.Children))
+	assert.Equal(t, 0, len(tree.root.children))
 }
 
 func TestTreeString(t *testing.T) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
-	tree.Add("foo/bar", 1)
+	tree.Add("", 1)
+	tree.Add("/foo", 7)
+	tree.Add("/foo/bar", 42)
 
-	assert.Equal(t, "topic.Tree:\n| 'foo' => 0\n|   'bar' => 1", tree.String())
+	assert.Equal(t, "topic.Tree:\n| '' => 1\n|   'foo' => 1\n|     'bar' => 1", tree.String())
 }
 
 func BenchmarkTreeAddSame(b *testing.B) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -313,8 +318,19 @@ func BenchmarkTreeAddSame(b *testing.B) {
 	}
 }
 
+func BenchmarkTreeAdd(b *testing.B) {
+	tree := NewStandardTree()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		tree.Add("foo/bar", i)
+	}
+}
+
 func BenchmarkTreeAddUnique(b *testing.B) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	strings := make([]string, 0, b.N)
 
@@ -322,6 +338,7 @@ func BenchmarkTreeAddUnique(b *testing.B) {
 		strings = append(strings, fmt.Sprintf("foo/%d", i))
 	}
 
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -330,8 +347,9 @@ func BenchmarkTreeAddUnique(b *testing.B) {
 }
 
 func BenchmarkTreeSetSame(b *testing.B) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -340,7 +358,7 @@ func BenchmarkTreeSetSame(b *testing.B) {
 }
 
 func BenchmarkTreeSetUnique(b *testing.B) {
-	tree := NewTree()
+	tree := NewStandardTree()
 
 	strings := make([]string, 0, b.N)
 
@@ -348,6 +366,7 @@ func BenchmarkTreeSetUnique(b *testing.B) {
 		strings = append(strings, fmt.Sprintf("foo/%d", i))
 	}
 
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -355,10 +374,25 @@ func BenchmarkTreeSetUnique(b *testing.B) {
 	}
 }
 
-func BenchmarkTreeMatchExact(b *testing.B) {
-	tree := NewTree()
-	tree.Add("foo/bar", 1)
+func TestTreeMatch10Milion(t *testing.T) {
+	tree := NewStandardTree()
+	type Obj struct {
+		Id int
+	}
+	for i := 0; i < 100000; i++ {
+		tree.Add("foo/bar", Obj{Id: i})
+	}
 
+	start := time.Now()
+	res := tree.Match("foo/bar")
+	t.Log("1", len(res), time.Now().Sub(start))
+}
+
+func BenchmarkTreeMatchExact(b *testing.B) {
+	tree := NewStandardTree()
+	tree.Add("foo/bar", 0)
+
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -367,9 +401,10 @@ func BenchmarkTreeMatchExact(b *testing.B) {
 }
 
 func BenchmarkTreeMatchWildcardOne(b *testing.B) {
-	tree := NewTree()
+	tree := NewStandardTree()
 	tree.Add("foo/+", 1)
 
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -378,9 +413,10 @@ func BenchmarkTreeMatchWildcardOne(b *testing.B) {
 }
 
 func BenchmarkTreeMatchWildcardSome(b *testing.B) {
-	tree := NewTree()
+	tree := NewStandardTree()
 	tree.Add("#", 1)
 
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -389,9 +425,10 @@ func BenchmarkTreeMatchWildcardSome(b *testing.B) {
 }
 
 func BenchmarkTreeSearchExact(b *testing.B) {
-	tree := NewTree()
+	tree := NewStandardTree()
 	tree.Add("foo/bar", 1)
 
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -400,9 +437,10 @@ func BenchmarkTreeSearchExact(b *testing.B) {
 }
 
 func BenchmarkTreeSearchWildcardOne(b *testing.B) {
-	tree := NewTree()
+	tree := NewStandardTree()
 	tree.Add("foo/bar", 1)
 
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -411,9 +449,10 @@ func BenchmarkTreeSearchWildcardOne(b *testing.B) {
 }
 
 func BenchmarkTreeSearchWildcardSome(b *testing.B) {
-	tree := NewTree()
+	tree := NewStandardTree()
 	tree.Add("foo/bar", 1)
 
+	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {

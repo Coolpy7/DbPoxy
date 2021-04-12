@@ -1,432 +1,354 @@
 package topic
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 )
 
-type Node struct {
-	Children map[string]*Node
-	Values   []interface{}
+type node struct {
+	children map[string]*node
+	values   []interface{}
 }
 
-func newNode() *Node {
-	return &Node{
-		Children: make(map[string]*Node),
+func newNode() *node {
+	return &node{
+		children: make(map[string]*node),
 	}
 }
 
-func (n *Node) removeValue(value interface{}) {
-	for i, v := range n.Values {
+func (n *node) removeValue(value interface{}) {
+	for i, v := range n.values {
 		if v == value {
-			// remove without preserving order
-			n.Values[i] = n.Values[len(n.Values)-1]
-			n.Values = n.Values[:len(n.Values)-1]
+			n.values[i] = n.values[len(n.values)-1]
+			n.values[len(n.values)-1] = nil
+			n.values = n.values[:len(n.values)-1]
 			break
 		}
 	}
 }
 
-func (n *Node) clearValues() {
-	n.Values = []interface{}{}
+func (n *node) clearValues() {
+	n.values = []interface{}{}
 }
 
-func (n *Node) string(i int) string {
+func (n *node) string(level int) string {
 	str := ""
-
-	if i != 0 {
-		str = fmt.Sprintf("%d", len(n.Values))
+	if level != 0 {
+		str = fmt.Sprintf("%d", len(n.values))
 	}
 
-	for key, node := range n.Children {
-		str += fmt.Sprintf("\n| %s'%s' => %s", strings.Repeat(" ", i*2), key, node.string(i+1))
+	for key, node := range n.children {
+		str += fmt.Sprintf("\n| %s'%s' => %s", strings.Repeat(" ", level*2), key, node.string(level+1))
 	}
-
 	return str
 }
 
-// A Tree implements a thread-safe topic tree.
 type Tree struct {
-	// The separator character. Default: "/"
-	Separator string
-
-	// The single level wildcard character. Default: "+"
-	WildcardOne string
-
-	// The multi level wildcard character. Default "#"
-	WildcardSome string
-
-	Root  *Node
-	mutex sync.RWMutex
+	separator    string
+	wildcardOne  string
+	wildcardSome string
+	root         *node
+	mutex        sync.RWMutex
 }
 
-// NewTree returns a new Tree.
-func NewTree() *Tree {
+func NewTree(separator, wildcardOne, wildcardSome string) *Tree {
 	return &Tree{
-		Separator:    "/",
-		WildcardOne:  "+",
-		WildcardSome: "#",
-
-		Root: newNode(),
+		separator:    separator,
+		wildcardOne:  wildcardOne,
+		wildcardSome: wildcardSome,
+		root:         newNode(),
 	}
 }
 
-// Add registers the value for the supplied topic. This function will
-// automatically grow the tree. If value already exists for the given topic it
-// will not be added again.
+func NewStandardTree() *Tree {
+	return NewTree("/", "+", "#")
+}
+
 func (t *Tree) Add(topic string, value interface{}) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
-	t.add(value, 0, strings.Split(topic, t.Separator), t.Root)
+	t.add(value, topic, t.root)
 }
 
-func (t *Tree) add(value interface{}, i int, segments []string, node *Node) {
-	// add value to leaf
-	if i == len(segments) {
-		for _, v := range node.Values {
+func (t *Tree) add(value interface{}, topic string, node *node) {
+	if topic == topicEnd {
+		for _, v := range node.values {
 			if v == value {
 				return
 			}
 		}
-
-		node.Values = append(node.Values, value)
+		node.values = append(node.values, value)
 		return
 	}
-
-	segment := segments[i]
-	child, ok := node.Children[segment]
-
-	// create missing node
+	segment := topicSegment(topic, t.separator)
+	child, ok := node.children[segment]
 	if !ok {
 		child = newNode()
-		node.Children[segment] = child
+		node.children[segment] = child
 	}
-
-	t.add(value, i+1, segments, child)
+	t.add(value, topicShorten(topic, t.separator), child)
 }
 
-// Set sets the supplied value as the only value for the supplied topic. This
-// function will automatically grow the tree.
 func (t *Tree) Set(topic string, value interface{}) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-
-	t.set(value, 0, strings.Split(topic, t.Separator), t.Root)
+	t.set(value, topic, t.root)
 }
 
-func (t *Tree) set(value interface{}, i int, segments []string, node *Node) {
-	// set value on leaf
-	if i == len(segments) {
-		node.Values = []interface{}{value}
+func (t *Tree) set(value interface{}, topic string, node *node) {
+	if topic == topicEnd {
+		node.values = []interface{}{value}
 		return
 	}
-
-	segment := segments[i]
-	child, ok := node.Children[segment]
-
-	// create missing node
+	segment := topicSegment(topic, t.separator)
+	child, ok := node.children[segment]
 	if !ok {
 		child = newNode()
-		node.Children[segment] = child
+		node.children[segment] = child
 	}
-
-	t.set(value, i+1, segments, child)
+	t.set(value, topicShorten(topic, t.separator), child)
 }
 
-// Get gets the values from the topic that exactly matches the supplied topics.
 func (t *Tree) Get(topic string) []interface{} {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-
-	return t.get(0, strings.Split(topic, t.Separator), t.Root)
+	return t.get(topic, t.root)
 }
 
-func (t *Tree) get(i int, segments []string, node *Node) []interface{} {
-	// set value on leaf
-	if i == len(segments) {
-		return node.Values
+func (t *Tree) get(topic string, node *node) []interface{} {
+	if topic == topicEnd {
+		return node.values
 	}
-
-	// get next segment
-	segment := segments[i]
-	child, ok := node.Children[segment]
+	segment := topicSegment(topic, t.separator)
+	child, ok := node.children[segment]
 	if !ok {
 		return nil
 	}
-
-	return t.get(i+1, segments, child)
+	return t.get(topicShorten(topic, t.separator), child)
 }
 
-// Remove un-registers the value from the supplied topic. This function will
-// automatically shrink the tree.
 func (t *Tree) Remove(topic string, value interface{}) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-
-	t.remove(value, 0, strings.Split(topic, t.Separator), t.Root)
+	t.remove(value, topic, t.root)
 }
 
-// Empty will unregister all values from the supplied topic. This function will
-// automatically shrink the tree.
 func (t *Tree) Empty(topic string) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-
-	t.remove(nil, 0, strings.Split(topic, t.Separator), t.Root)
+	t.remove(nil, topic, t.root)
 }
 
-func (t *Tree) remove(value interface{}, i int, segments []string, node *Node) bool {
-	// clear or remove value from leaf node
-	if i == len(segments) {
+func (t *Tree) remove(value interface{}, topic string, node *node) bool {
+	if topic == topicEnd {
 		if value == nil {
 			node.clearValues()
 		} else {
 			node.removeValue(value)
 		}
-
-		return len(node.Values) == 0 && len(node.Children) == 0
+		return len(node.values) == 0 && len(node.children) == 0
 	}
-
-	segment := segments[i]
-	child, ok := node.Children[segment]
-
-	// node not found
+	segment := topicSegment(topic, t.separator)
+	child, ok := node.children[segment]
 	if !ok {
 		return false
 	}
-
-	if t.remove(value, i+1, segments, child) {
-		delete(node.Children, segment)
+	if t.remove(value, topicShorten(topic, t.separator), child) {
+		delete(node.children, segment)
 	}
-
-	return len(node.Values) == 0 && len(node.Children) == 0
+	return len(node.values) == 0 && len(node.children) == 0
 }
 
-// Clear will unregister the supplied value from all topics. This function will
-// automatically shrink the tree.
 func (t *Tree) Clear(value interface{}) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-
-	t.clear(value, t.Root)
+	t.clear(value, t.root)
 }
 
-func (t *Tree) clear(value interface{}, node *Node) bool {
+func (t *Tree) clear(value interface{}, node *node) bool {
 	node.removeValue(value)
-
-	// remove value from all nodes
-	for segment, child := range node.Children {
+	for segment, child := range node.children {
 		if t.clear(value, child) {
-			delete(node.Children, segment)
+			delete(node.children, segment)
 		}
 	}
 
-	return len(node.Values) == 0 && len(node.Children) == 0
+	return len(node.values) == 0 && len(node.children) == 0
 }
 
-// Match will return a set of values from topics that match the supplied topic.
-// The result set will be cleared from duplicate values.
-//
-// Note: In contrast to Search, Match does not respect wildcards in the query but
-// in the stored tree.
 func (t *Tree) Match(topic string) []interface{} {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
-
-	segments := strings.Split(topic, t.Separator)
-	values := t.match([]interface{}{}, 0, segments, t.Root)
-
-	return t.clean(values)
+	var list []interface{}
+	t.match(topic, t.root, func(values []interface{}) bool {
+		list = append(list, values...)
+		return true
+	})
+	return t.clean(list)
 }
 
-func (t *Tree) match(result []interface{}, i int, segments []string, node *Node) []interface{} {
-	// add all values to the result set that match multiple levels
-	if child, ok := node.Children[t.WildcardSome]; ok {
-		result = append(result, child.Values...)
-	}
+func (t *Tree) MatchFirst(topic string) interface{} {
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+	var value interface{}
+	t.match(topic, t.root, func(values []interface{}) bool {
+		value = values[0]
+		return false
+	})
+	return value
+}
 
-	// when finished add all values to the result set
-	if i == len(segments) {
-		return append(result, node.Values...)
-	}
-
-	// advance children that match a single level
-	if child, ok := node.Children[t.WildcardOne]; ok {
-		result = t.match(result, i+1, segments, child)
-	}
-
-	segment := segments[i]
-
-	// match segments and get children
-	if segment != t.WildcardOne && segment != t.WildcardSome {
-		if child, ok := node.Children[segment]; ok {
-			result = t.match(result, i+1, segments, child)
+func (t *Tree) match(topic string, node *node, fn func([]interface{}) bool) {
+	if child, ok := node.children[t.wildcardSome]; ok && len(child.values) > 0 {
+		if !fn(child.values) {
+			return
 		}
 	}
-
-	return result
-}
-
-// MatchFirst will run Match and return the first value or nil.
-func (t *Tree) MatchFirst(topic string) interface{} {
-	values := t.Match(topic)
-
-	if len(values) > 0 {
-		return values[0]
+	if topic == topicEnd {
+		if len(node.values) > 0 {
+			fn(node.values)
+		}
+		return
 	}
-
-	return nil
+	if child, ok := node.children[t.wildcardOne]; ok {
+		t.match(topicShorten(topic, t.separator), child, fn)
+	}
+	segment := topicSegment(topic, t.separator)
+	if segment != t.wildcardOne && segment != t.wildcardSome {
+		if child, ok := node.children[segment]; ok {
+			t.match(topicShorten(topic, t.separator), child, fn)
+		}
+	}
 }
 
-// Search will return a set of values from topics that match the supplied topic.
-// The result set will be cleared from duplicate values.
-//
-// Note: In contrast to Match, Search respects wildcards in the query but not in
-// the stored tree.
 func (t *Tree) Search(topic string) []interface{} {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
-
-	segments := strings.Split(topic, t.Separator)
-	values := t.search([]interface{}{}, 0, segments, t.Root)
-
-	return t.clean(values)
+	var list []interface{}
+	t.search(topic, t.root, func(values []interface{}) bool {
+		list = append(list, values...)
+		return true
+	})
+	return t.clean(list)
 }
 
-func (t *Tree) search(result []interface{}, i int, segments []string, node *Node) []interface{} {
-	// when finished add all values to the result set
-	if i == len(segments) {
-		return append(result, node.Values...)
-	}
-
-	// get segment
-	segment := segments[i]
-
-	// add all current and further values
-	if segment == t.WildcardSome {
-		result = append(result, node.Values...)
-
-		for _, child := range node.Children {
-			result = t.search(result, i, segments, child)
-		}
-	}
-
-	// add all current values and continue
-	if segment == t.WildcardOne {
-		result = append(result, node.Values...)
-
-		for _, child := range node.Children {
-			result = t.search(result, i+1, segments, child)
-		}
-	}
-
-	// match segments and get children
-	if segment != t.WildcardOne && segment != t.WildcardSome {
-		if child, ok := node.Children[segment]; ok {
-			result = t.search(result, i+1, segments, child)
-		}
-	}
-
-	return result
-}
-
-// SearchFirst will run Search and return the first value or nil.
 func (t *Tree) SearchFirst(topic string) interface{} {
-	values := t.Search(topic)
-
-	if len(values) > 0 {
-		return values[0]
-	}
-
-	return nil
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
+	var value interface{}
+	t.search(topic, t.root, func(values []interface{}) bool {
+		value = values[0]
+		return false
+	})
+	return value
 }
 
-// clean will remove duplicates
-func (t *Tree) clean(values []interface{}) []interface{} {
-	result := values[:0]
+func (t *Tree) search(topic string, node *node, fn func([]interface{}) bool) {
+	if topic == topicEnd {
+		if len(node.values) > 0 {
+			fn(node.values)
+		}
+		return
+	}
+	segment := topicSegment(topic, t.separator)
+	if segment == t.wildcardSome {
+		if len(node.values) > 0 {
+			if !fn(node.values) {
+				return
+			}
+		}
+		for _, child := range node.children {
+			t.search(topic, child, fn)
+		}
+	}
+	if segment == t.wildcardOne {
+		if len(node.values) > 0 {
+			if !fn(node.values) {
+				return
+			}
+		}
 
+		for _, child := range node.children {
+			t.search(topicShorten(topic, t.separator), child, fn)
+		}
+	}
+	if segment != t.wildcardOne && segment != t.wildcardSome {
+		if child, ok := node.children[segment]; ok {
+			t.search(topicShorten(topic, t.separator), child, fn)
+		}
+	}
+}
+
+func (t *Tree) clean(values []interface{}) []interface{} {
+	seen := make(map[interface{}]struct{}, len(values))
+	j := 0
 	for _, v := range values {
-		if contains(result, v) {
+		if _, ok := seen[v]; ok {
 			continue
 		}
-
-		result = append(result, v)
+		seen[v] = struct{}{}
+		values[j] = v
+		j++
 	}
-
-	return result
+	seen = nil
+	return values[:j]
 }
 
-// Count will count all stored values in the tree. It will not filter out
-// duplicate values and thus might return a different result to `len(All())`.
 func (t *Tree) Count() int {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
-
-	return t.count(0, t.Root)
+	return t.count(t.root)
 }
 
-func (t *Tree) count(counter int, node *Node) int {
-	// add children to results
-	for _, child := range node.Children {
-		counter += t.count(counter, child)
+func (t *Tree) count(node *node) int {
+	total := 0
+	for _, child := range node.children {
+		total += t.count(child)
 	}
-
-	// add values to result
-	return counter + len(node.Values)
+	return total + len(node.values)
 }
 
-// All will return all stored values in the tree.
 func (t *Tree) All() []interface{} {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
-
-	return t.clean(t.all([]interface{}{}, t.Root))
+	return t.clean(t.all([]interface{}{}, t.root))
 }
 
-func (t *Tree) all(result []interface{}, node *Node) []interface{} {
-	// add children to results
-	for _, child := range node.Children {
+func (t *Tree) all(result []interface{}, node *node) []interface{} {
+	for _, child := range node.children {
 		result = t.all(result, child)
 	}
-
-	// add current node to results
-	return append(result, node.Values...)
+	return append(result, node.values...)
 }
 
-// Reset will completely clear the tree.
 func (t *Tree) Reset() {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
-
-	t.Root = newNode()
+	t.root = newNode()
 }
 
-// String will return a string representation of the tree.
 func (t *Tree) String() string {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
-
-	return fmt.Sprintf("topic.Tree:%s", t.Root.string(0))
+	return fmt.Sprintf("topic.Tree:%s", t.root.string(0))
 }
 
-func contains(list []interface{}, value interface{}) bool {
-	for _, v := range list {
-		if v == value {
-			return true
-		}
+var topicEnd = "\x00"
+
+func topicShorten(topic, separator string) string {
+	i := strings.Index(topic, separator)
+	if i >= 0 {
+		return topic[i+1:]
 	}
-
-	return false
+	return topicEnd
 }
 
-func (t *Tree) Dump() []byte {
-	bts, _ := json.Marshal(t.Root)
-	return bts
-}
-
-func (t *Tree) Recover(bts []byte) error {
-	return json.Unmarshal(bts, &t.Root)
+func topicSegment(topic, separator string) string {
+	i := strings.Index(topic, separator)
+	if i >= 0 {
+		return topic[:i]
+	}
+	return topic
 }
