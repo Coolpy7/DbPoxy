@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 	"flag"
-	"github.com/Coolpy7/DbPoxy/src/dbpoxy"
+	"github.com/Coolpy7/DbPoxy/dbpoxy"
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 	"io"
 	"log"

@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Coolpy7/DbPoxy/src/topic"
+	"github.com/Coolpy7/DbPoxy/topic"
 	_ "github.com/denisenkom/go-mssqldb"
 	MQTT "github.com/eclipse/paho.mqtt.golang"
 	_ "github.com/go-sql-driver/mysql"
