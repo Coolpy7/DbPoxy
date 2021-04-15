@@ -1,6 +1,13 @@
+#tdengine
+DatabaseType: tdengine
+DatabaseKeep: 7300
+DatabaseDays: 30
+DatabaseInitTable: "(ts timestamp, current float, voltage int, phase float) tags(location binary(64), groupId int);"
+DatabaseConnectionString: "root:taosdata@/tcp(127.0.0.1:6030)/"
+
 #mongodb
-DatabaseType: mongodb
-DatabaseConnectionString: mongodb://localhost:27017
+#DatabaseType: mongodb
+#DatabaseConnectionString: mongodb://localhost:27017
 #DatabaseConnectionString: mongodb://user:pass@192.168.100.251:27017,192.168.100.252:27017,192.168.100.250:27017/?replicaSet=rs1&authSource=admin
 
 #postgres

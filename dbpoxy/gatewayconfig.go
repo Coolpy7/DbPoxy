@@ -2,6 +2,9 @@ package dbpoxy
 
 type GatewayConfig struct {
 	DatabaseType             string  `yaml:"DatabaseType"`
+	DatabaseInitTable        string  `yaml:"DatabaseInitTable"`
+	DatabaseKeep             int     `yaml:"DatabaseKeep"`
+	DatabaseDays             int     `yaml:"DatabaseDays"`
 	DatabaseConnectionString string  `yaml:"DatabaseConnectionString"`
 	BrokerHost               string  `yaml:"BrokerHost"`
 	BrokerPort               int     `yaml:"BrokerPort"`

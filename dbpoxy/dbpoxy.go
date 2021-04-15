@@ -3,6 +3,7 @@ package dbpoxy
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/go-xorm/xorm"
 	_ "github.com/lib/pq"
+	_ "github.com/taosdata/driver-go/taosSql"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -38,6 +40,7 @@ type DbPoxy struct {
 	Cmdfig  *CmdConfig
 	Mongo   *mongo.Client
 	Sqldb   *xorm.Engine
+	TdDb    *sql.DB
 	jsonpre byte
 	jsonend byte
 	Quit    chan bool
@@ -60,6 +63,9 @@ func (d *DbPoxy) Close() {
 	}
 	if d.Sqldb != nil {
 		_ = d.Sqldb.Close()
+	}
+	if d.TdDb != nil {
+		_ = d.TdDb.Close()
 	}
 }
 
@@ -223,6 +229,12 @@ func (d *DbPoxy) mqttHandler(client MQTT.Client, msg MQTT.Message) {
 		}
 	} else if d.Config.DatabaseType == "oss-gridfs" {
 		d.ssodo(client, op)
+	} else if d.Config.DatabaseType == "tdengine" {
+		if op.SaveMode == nil {
+			d.tdsqldo(client, op)
+		} else {
+			d.SendOk(client, &op, nil, 0, errors.New("not suport SaveMode"))
+		}
 	}
 }
 
@@ -334,6 +346,97 @@ func (d *DbPoxy) ssodo(client MQTT.Client, op Operation) {
 			}
 			d.SendOk(client, &op, op.FilterId, 1, err)
 		}
+	default:
+		d.SendOk(client, &op, nil, 0, errors.New("invail op"))
+	}
+}
+
+func (d *DbPoxy) tdsqldo(client MQTT.Client, op Operation) {
+	// use database
+	sqlStr := "use " + op.DbName
+	_, err := d.TdDb.Exec(sqlStr)
+	if err != nil {
+		// create database
+		sqlStr = "create database " + op.DbName + " keep " + strconv.Itoa(d.Config.DatabaseKeep) + " days " + strconv.Itoa(d.Config.DatabaseDays)
+		_, err = d.TdDb.Exec(sqlStr)
+		if err != nil {
+			d.SendOk(client, &op, nil, 0, err)
+			return
+		}
+		sqlStr = "create table if not exists " + op.DbName + "." + op.TableName + " " + d.Config.DatabaseInitTable
+		_, err = d.TdDb.Exec(sqlStr)
+		if err != nil {
+			d.SendOk(client, &op, nil, 0, err)
+			return
+		}
+	}
+	switch op.OpName {
+	case "create":
+		if op.SqlExec == "" {
+			d.SendOk(client, &op, nil, 0, errors.New("sqlexec is nil"))
+			return
+		}
+		//create table if not exists test.d0 using test.meters tags('Beijing', 0);
+		sqlStr := "create table if not exists " + op.DbName + "." + op.TableChildName + " using " + op.DbName + "." + op.TableName + " " + op.SqlExec
+		_, err := d.TdDb.Exec(sqlStr)
+		if err != nil {
+			d.SendOk(client, &op, nil, 0, err)
+			return
+		}
+		d.SendOk(client, &op, "ok", 0, nil)
+	case "insert":
+		if op.SqlExec == "" {
+			d.SendOk(client, &op, nil, 0, errors.New("sqlexec is nil"))
+			return
+		}
+		sqlStr := "insert into " + op.DbName + "." + op.TableChildName + " values " + op.SqlExec
+		ref, err := d.TdDb.Exec(sqlStr)
+		if err != nil {
+			d.SendOk(client, &op, nil, 0, err)
+			return
+		}
+		nid, err := ref.LastInsertId()
+		if err != nil {
+			d.SendOk(client, &op, nil, 0, err)
+			return
+		}
+		d.SendOk(client, &op, map[string]interface{}{"id": nid}, 1, nil)
+	case "query":
+		if op.SqlQuery == "" {
+			d.SendOk(client, &op, nil, 0, errors.New("sqlquery is nil"))
+			return
+		}
+		rows, err := d.TdDb.Query(op.SqlQuery)
+		if err != nil {
+			d.SendOk(client, &op, nil, 0, err)
+			return
+		}
+		cols, err := rows.Columns()
+		if err != nil {
+			d.SendOk(client, &op, nil, 0, err)
+			return
+		}
+		defer rows.Close()
+		res := make([]map[string]interface{}, 0)
+		for rows.Next() {
+			columns := make([]interface{}, len(cols))
+			columnPointers := make([]interface{}, len(cols))
+			for i, _ := range columns {
+				columnPointers[i] = &columns[i]
+			}
+			err := rows.Scan(columnPointers...)
+			if err != nil {
+				d.SendOk(client, &op, nil, 0, err)
+				return
+			}
+			m := make(map[string]interface{})
+			for i, colName := range cols {
+				val := columnPointers[i].(*interface{})
+				m[colName] = *val
+			}
+			res = append(res, m)
+		}
+		d.SendOk(client, &op, res, len(res), nil)
 	default:
 		d.SendOk(client, &op, nil, 0, errors.New("invail op"))
 	}
@@ -799,6 +902,13 @@ func (d *DbPoxy) ParseConfig(filename string) error {
 		} else {
 			log.Println(d.Config.DatabaseType, "ping ok")
 		}
+	} else if d.Config.DatabaseType == "tdengine" {
+		db, err := sql.Open("taosSql", d.Config.DatabaseConnectionString)
+		if err != nil {
+			return err
+		}
+		d.TdDb = db
+		log.Println(d.Config.DatabaseType, "ping ok")
 	} else {
 		log.Println(d.Config.DatabaseType, "not suport database type")
 	}
