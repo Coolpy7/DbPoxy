@@ -11,6 +11,16 @@ $ sudo cp td/inc/* /usr/local/include
 $ sudo ldconfig
 ```
 
+# using
+## edit bin/data/dbpoxy.yml
+```
+DatabaseType: tdengine
+DatabaseKeep: 7300
+DatabaseDays: 30
+DatabaseInitTable: "(ts timestamp, current float, voltage int, phase float) tags(location binary(64), groupId int);"
+DatabaseConnectionString: "root:taosdata@/tcp(127.0.0.1:6030)/"
+```
+
 # DbPoxy tdengine
 Coolpy7数据库代理
 ```
